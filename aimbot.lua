@@ -261,6 +261,7 @@ local LegacyConfigStatePath = LegacyConfigRoot .. "/config_state.json"
 local ConfigState = {
     ActiveConfig = "default",
     AutoSave = true,
+    LoadSection = "All",
 }
 local ConfigControls = {}
 local ConfigApplying = false
@@ -300,6 +301,90 @@ local ConfigKeys = {
     "AimbotKey", "AimbotBindMode", "TriggerbotKey", "TriggerbotBindMode",
     "NoclipKey", "NoclipBindMode", "SpeedKey", "SpeedBindMode",
     "TeleportOffset", "TeleportWhitelist",
+}
+
+RuntimeEnvironment.uorkeeConfigSections = {
+    Combat = {
+        TeamCheck = true,
+        AimbotEnabled = true,
+        TriggerbotEnabled = true,
+        TriggerDelay = true,
+        WallCheck = true,
+        ShowFOV = true,
+        RainbowFOV = true,
+        FOVRadius = true,
+        AimSpeed = true,
+    },
+    Audio = {
+        HitSoundEnabled = true,
+        HitSoundVolume = true,
+        HitSoundPitch = true,
+        HitSoundUseCustom = true,
+        HitSoundCustomId = true,
+        VictoryMusicEnabled = true,
+        VictoryMusicVolume = true,
+        VictoryMusicId1 = true,
+        VictoryMusicStartOffset1 = true,
+        VictoryMusicId2 = true,
+        VictoryMusicStartOffset2 = true,
+        VictoryMusicId3 = true,
+        VictoryMusicStartOffset3 = true,
+        VictoryMusicId4 = true,
+        VictoryMusicStartOffset4 = true,
+        VictoryMusicId5 = true,
+        VictoryMusicStartOffset5 = true,
+    },
+    Visuals = {
+        ESPEnabled = true,
+        NamesESP = true,
+        DeathStatueEnabled = true,
+        DeathStatueText = true,
+    },
+    Movement = {
+        NoclipEnabled = true,
+        SpeedEnabled = true,
+        SpeedValue = true,
+        InfiniteJumpEnabled = true,
+        FakeLagEnabled = true,
+        FakeLagHold = true,
+        FakeLagRelease = true,
+        TeleportOffset = true,
+        TeleportWhitelist = true,
+    },
+    Keybinds = {
+        MenuKey = true,
+        TeleportKey = true,
+        TeleportBindMode = true,
+        AimbotKey = true,
+        AimbotBindMode = true,
+        TriggerbotKey = true,
+        TriggerbotBindMode = true,
+        NoclipKey = true,
+        NoclipBindMode = true,
+        SpeedKey = true,
+        SpeedBindMode = true,
+    },
+    Appearance = {
+        MenuOpacity = true,
+        Red = true,
+        Green = true,
+        Blue = true,
+        AmbientModeEnabled = true,
+        AmbientTintStrength = true,
+        AmbientParticleRate = true,
+    },
+}
+RuntimeEnvironment.uorkeeConfigSectionOrder = {
+    "All", "Combat", "Audio", "Visuals", "Movement", "Keybinds", "Appearance",
+}
+RuntimeEnvironment.uorkeeConfigSectionLabels = {
+    All = "ALL SETTINGS",
+    Combat = "COMBAT",
+    Audio = "AUDIO",
+    Visuals = "VISUALS",
+    Movement = "MOVEMENT",
+    Keybinds = "KEYBINDS",
+    Appearance = "APPEARANCE",
 }
 
 local BindingSettingKeys = {
@@ -432,10 +517,11 @@ local function serializeSettings()
     return result
 end
 
-local function applySettings(data, updateControls)
+local function applySettings(data, updateControls, allowedKeys)
     if type(data) ~= "table" then return false end
     ConfigApplying = true
-    if type(data.VictoryMusicStartOffset) == "number" then
+    if type(data.VictoryMusicStartOffset) == "number"
+        and (not allowedKeys or allowedKeys.VictoryMusicStartOffset1) then
         for slot = 1, 5 do
             local offsetKey = "VictoryMusicStartOffset" .. tostring(slot)
             if data[offsetKey] == nil then
@@ -445,7 +531,7 @@ local function applySettings(data, updateControls)
     end
     for _, key in ipairs(ConfigKeys) do
         local value = data[key]
-        if value ~= nil then
+        if value ~= nil and (not allowedKeys or allowedKeys[key]) then
             if BindingSettingKeys[key] then
                 local binding = bindingFromName(value)
                 if binding then Settings[key] = binding end
@@ -469,7 +555,9 @@ local function applySettings(data, updateControls)
 
     if updateControls then
         for key, setter in pairs(ConfigControls) do
-            setter(Settings[key])
+            if not allowedKeys or allowedKeys[key] then
+                setter(Settings[key])
+            end
         end
         if refreshKeyButtons then refreshKeyButtons() end
     end
@@ -486,15 +574,24 @@ local function saveConfig(name)
     })
 end
 
-local function loadConfig(name, updateControls)
+local function loadConfig(name, updateControls, sectionName)
     name = sanitizeConfigName(name or ConfigState.ActiveConfig)
     local payload, loadError = readJson(configPath(name))
     if not payload then return false, loadError end
     local data = payload.Settings or payload
-    if not applySettings(data, updateControls) then
+    local allowedKeys
+    if sectionName then
+        allowedKeys = RuntimeEnvironment.uorkeeConfigSections[sectionName]
+        if type(allowedKeys) ~= "table" then
+            return false, "unknown config section"
+        end
+    end
+    if not applySettings(data, updateControls, allowedKeys) then
         return false, "invalid config data"
     end
-    ConfigState.ActiveConfig = name
+    if not sectionName then
+        ConfigState.ActiveConfig = name
+    end
     return true
 end
 
@@ -503,6 +600,7 @@ local function saveConfigState()
         Version = 1,
         ActiveConfig = sanitizeConfigName(ConfigState.ActiveConfig),
         AutoSave = ConfigState.AutoSave == true,
+        LoadSection = ConfigState.LoadSection,
     })
 end
 
@@ -517,6 +615,10 @@ do
         ConfigState.ActiveConfig = sanitizeConfigName(state.ActiveConfig)
         if type(state.AutoSave) == "boolean" then
             ConfigState.AutoSave = state.AutoSave
+        end
+        if state.LoadSection == "All"
+            or RuntimeEnvironment.uorkeeConfigSections[state.LoadSection] then
+            ConfigState.LoadSection = state.LoadSection
         end
     end
     local loaded = loadConfig(ConfigState.ActiveConfig, false)
@@ -866,6 +968,7 @@ end
 do
     local definitions = {
         {"combat", "Combat", "Aimbot, triggerbot and targeting preferences"},
+        {"audio", "Audio", "Hit feedback and round victory music"},
         {"visuals", "Visuals", "Player highlights and visibility"},
         {"movement", "Movement", "Movement tools and timing"},
         {"binds", "Keybinds", "Choose a key, then Hold or Toggle for each feature"},
@@ -1793,6 +1896,8 @@ addToggle("Enable Aimbot", Settings.AimbotEnabled, function(value) Settings.Aimb
 addToggle("Auto LMB (Triggerbot)", Settings.TriggerbotEnabled, function(value)
     Settings.TriggerbotEnabled = value
 end, "TriggerbotEnabled")
+
+Content = MenuUI.Pages.audio
 addSection("--- HIT FEEDBACK ---")
 addToggle("XP Orb Hit Sound", Settings.HitSoundEnabled, function(value)
     Settings.HitSoundEnabled = value
@@ -1836,6 +1941,8 @@ for slot = 1, 5 do
         if preview then preview(slotNumber) end
     end)
 end
+
+Content = MenuUI.Pages.combat
 addSection("--- TARGETING ---")
 addToggle("Wall Check", Settings.WallCheck, function(value) Settings.WallCheck = value end, "WallCheck")
 addToggle("Show FOV", Settings.ShowFOV, function(value)
@@ -1916,6 +2023,29 @@ addToggle("Auto Save", ConfigState.AutoSave, function(value)
     end
 end)
 
+addSection("--- LOAD SCOPE ---")
+ConfigState.LoadSectionButton = addAction(
+    "Load Mode: " .. RuntimeEnvironment.uorkeeConfigSectionLabels[ConfigState.LoadSection]
+        .. "  (click to change)",
+    function()
+        local order = RuntimeEnvironment.uorkeeConfigSectionOrder
+        local currentIndex = 1
+        for index, sectionName in ipairs(order) do
+            if sectionName == ConfigState.LoadSection then
+                currentIndex = index
+                break
+            end
+        end
+        ConfigState.LoadSection = order[currentIndex % #order + 1]
+        ConfigState.LoadSectionButton.Text = "Load Mode: "
+            .. RuntimeEnvironment.uorkeeConfigSectionLabels[ConfigState.LoadSection]
+            .. "  (click to change)"
+        saveConfigState()
+        setConfigStatus("Load mode: "
+            .. RuntimeEnvironment.uorkeeConfigSectionLabels[ConfigState.LoadSection], true)
+    end
+)
+
 addAction("Save Config", function()
     local name = selectedConfigName()
     local success, saveError = saveConfig(name)
@@ -1927,13 +2057,26 @@ addAction("Save Config", function()
     end
 end)
 
-addAction("Load Config", function()
+addAction("Load Config / Selected Section", function()
     local name = selectedConfigName()
-    local success, loadError = loadConfig(name, true)
+    local sectionName = ConfigState.LoadSection ~= "All" and ConfigState.LoadSection or nil
+    local activeConfig = ConfigState.ActiveConfig
+    local success, loadError = loadConfig(name, true, sectionName)
     if success then
-        ConfigNameBox.Text = ConfigState.ActiveConfig
-        saveConfigState()
-        setConfigStatus("Loaded: " .. name, true)
+        if sectionName then
+            ConfigState.ActiveConfig = activeConfig
+            saveConfigState()
+            queueAutoSave()
+            setConfigStatus(
+                "Imported " .. RuntimeEnvironment.uorkeeConfigSectionLabels[sectionName]
+                    .. " from " .. name .. " into " .. activeConfig,
+                true
+            )
+        else
+            ConfigNameBox.Text = ConfigState.ActiveConfig
+            saveConfigState()
+            setConfigStatus("Loaded all settings: " .. name, true)
+        end
     else
         setConfigStatus("Load failed: " .. tostring(loadError), false)
     end
