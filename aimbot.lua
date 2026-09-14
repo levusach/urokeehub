@@ -566,8 +566,7 @@ local function applySettings(data, updateControls, allowedKeys)
 end
 
 local function saveConfig(name)
-    name = sanitizeConfigName(name or ConfigState.ActiveConfig)
-    ConfigState.ActiveConfig = name
+    name = sanitizeConfigName(name or "default")
     return writeJson(configPath(name), {
         Version = 1,
         Settings = serializeSettings(),
@@ -575,7 +574,7 @@ local function saveConfig(name)
 end
 
 local function loadConfig(name, updateControls, sectionName)
-    name = sanitizeConfigName(name or ConfigState.ActiveConfig)
+    name = sanitizeConfigName(name or "default")
     local payload, loadError = readJson(configPath(name))
     if not payload then return false, loadError end
     local data = payload.Settings or payload
@@ -589,16 +588,13 @@ local function loadConfig(name, updateControls, sectionName)
     if not applySettings(data, updateControls, allowedKeys) then
         return false, "invalid config data"
     end
-    if not sectionName then
-        ConfigState.ActiveConfig = name
-    end
     return true
 end
 
 local function saveConfigState()
     return writeJson(ConfigStatePath, {
         Version = 1,
-        ActiveConfig = sanitizeConfigName(ConfigState.ActiveConfig),
+        ActiveConfig = "default",
         AutoSave = ConfigState.AutoSave == true,
         LoadSection = ConfigState.LoadSection,
     })
@@ -607,12 +603,13 @@ end
 do
     local state = readJson(ConfigStatePath)
     local migratedLegacyState = false
+    ConfigState.PreviousActiveConfig = "default"
     if type(state) ~= "table" then
         state = readJson(LegacyConfigStatePath)
         migratedLegacyState = type(state) == "table"
     end
     if type(state) == "table" then
-        ConfigState.ActiveConfig = sanitizeConfigName(state.ActiveConfig)
+        ConfigState.PreviousActiveConfig = sanitizeConfigName(state.ActiveConfig)
         if type(state.AutoSave) == "boolean" then
             ConfigState.AutoSave = state.AutoSave
         end
@@ -621,16 +618,30 @@ do
             ConfigState.LoadSection = state.LoadSection
         end
     end
-    local loaded = loadConfig(ConfigState.ActiveConfig, false)
-    if not loaded then
-        local legacyPath = LegacyConfigFolder .. "/" .. sanitizeConfigName(ConfigState.ActiveConfig) .. ".json"
-        local legacyPayload = readJson(legacyPath)
-        if type(legacyPayload) == "table" then
-            applySettings(legacyPayload.Settings or legacyPayload, false)
-            saveConfig(ConfigState.ActiveConfig)
+    ConfigState.ActiveConfig = "default"
+    local loaded = false
+    if ConfigState.PreviousActiveConfig ~= "default" then
+        loaded = loadConfig(ConfigState.PreviousActiveConfig, false)
+        if loaded then
+            saveConfig("default")
             migratedLegacyState = true
         end
     end
+    if not loaded then
+        loaded = loadConfig("default", false)
+    end
+    if not loaded then
+        local legacyPath = LegacyConfigFolder .. "/"
+            .. (ConfigState.PreviousActiveConfig ~= "default" and ConfigState.PreviousActiveConfig or "default")
+            .. ".json"
+        local legacyPayload = readJson(legacyPath)
+        if type(legacyPayload) == "table" then
+            applySettings(legacyPayload.Settings or legacyPayload, false)
+            saveConfig("default")
+            migratedLegacyState = true
+        end
+    end
+    ConfigState.PreviousActiveConfig = nil
     if migratedLegacyState then saveConfigState() end
 end
 
@@ -650,10 +661,11 @@ local function queueAutoSave()
     task.delay(0.35, function()
         if revision ~= autoSaveRevision then return end
         if RuntimeEnvironment.uorkeeConfigSessionToken ~= ConfigSessionToken then return end
-        local success, saveError = saveConfig(ConfigState.ActiveConfig)
+        ConfigState.ActiveConfig = "default"
+        local success, saveError = saveConfig("default")
         if success then
             saveConfigState()
-            setConfigStatus("Auto-saved: " .. ConfigState.ActiveConfig, true)
+            setConfigStatus("Auto-saved: default", true)
         else
             setConfigStatus("Auto-save failed: " .. tostring(saveError), false)
         end
@@ -2020,6 +2032,9 @@ addToggle("Auto Save", ConfigState.AutoSave, function(value)
         setConfigStatus("State save failed: " .. tostring(stateError), false)
     elseif not value then
         setConfigStatus("Auto Save disabled", true)
+    else
+        queueAutoSave()
+        setConfigStatus("Auto Save enabled: default", true)
     end
 end)
 
@@ -2051,7 +2066,7 @@ addAction("Save Config", function()
     local success, saveError = saveConfig(name)
     if success then
         saveConfigState()
-        setConfigStatus("Saved: " .. name, true)
+        setConfigStatus("Saved preset: " .. name .. " (Auto Save -> default)", true)
     else
         setConfigStatus("Save failed: " .. tostring(saveError), false)
     end
@@ -2060,22 +2075,20 @@ end)
 addAction("Load Config / Selected Section", function()
     local name = selectedConfigName()
     local sectionName = ConfigState.LoadSection ~= "All" and ConfigState.LoadSection or nil
-    local activeConfig = ConfigState.ActiveConfig
     local success, loadError = loadConfig(name, true, sectionName)
     if success then
+        ConfigState.ActiveConfig = "default"
+        ConfigNameBox.Text = "default"
+        saveConfigState()
+        queueAutoSave()
         if sectionName then
-            ConfigState.ActiveConfig = activeConfig
-            saveConfigState()
-            queueAutoSave()
             setConfigStatus(
                 "Imported " .. RuntimeEnvironment.uorkeeConfigSectionLabels[sectionName]
-                    .. " from " .. name .. " into " .. activeConfig,
+                    .. " from " .. name .. " into default",
                 true
             )
         else
-            ConfigNameBox.Text = ConfigState.ActiveConfig
-            saveConfigState()
-            setConfigStatus("Loaded all settings: " .. name, true)
+            setConfigStatus("Loaded all from " .. name .. " into default", true)
         end
     else
         setConfigStatus("Load failed: " .. tostring(loadError), false)
@@ -2084,6 +2097,10 @@ end)
 
 addAction("Delete Config", function()
     local name = selectedConfigName()
+    if name == "default" then
+        setConfigStatus("Default is universal and cannot be deleted", false)
+        return
+    end
     if type(DeleteFile) ~= "function" then
         setConfigStatus("Delete API unavailable", false)
         return
@@ -2097,11 +2114,6 @@ addAction("Delete Config", function()
     if not success then
         setConfigStatus("Delete failed: " .. tostring(deleteError), false)
         return
-    end
-    if ConfigState.ActiveConfig == name then
-        ConfigState.ActiveConfig = "default"
-        ConfigNameBox.Text = ConfigState.ActiveConfig
-        saveConfigState()
     end
     setConfigStatus("Deleted: " .. name, true)
 end)
@@ -3741,7 +3753,7 @@ local function terminate()
     if stopped then return end
     stopped = true
     if ConfigState.AutoSave then
-        pcall(function() saveConfig(ConfigState.ActiveConfig) end)
+        pcall(function() saveConfig("default") end)
     end
     pcall(saveConfigState)
     if RuntimeEnvironment.uorkeeConfigSessionToken == ConfigSessionToken then
@@ -3929,10 +3941,11 @@ refreshTheme()
 task.defer(function()
     if RuntimeEnvironment.uorkeeConfigSessionToken ~= ConfigSessionToken then return end
     if ConfigState.AutoSave then
-        local success, saveError = saveConfig(ConfigState.ActiveConfig)
+        ConfigState.ActiveConfig = "default"
+        local success, saveError = saveConfig("default")
         if success then
             saveConfigState()
-            setConfigStatus("Auto Save active: " .. ConfigState.ActiveConfig, true)
+            setConfigStatus("Auto Save active: default", true)
         else
             setConfigStatus("Config unavailable: " .. tostring(saveError), false)
         end
