@@ -55,6 +55,13 @@ do
     RuntimeEnvironment.uorkeeAmbientState = nil
 end
 
+if type(RuntimeEnvironment.uorkeeBoundaryCleanup) == "function" then
+    pcall(RuntimeEnvironment.uorkeeBoundaryCleanup)
+end
+RuntimeEnvironment.uorkeeBoundaryCleanup = nil
+RuntimeEnvironment.uorkeeBoundaryState = nil
+RuntimeEnvironment.uorkeeSetBoundaryESP = nil
+
 do
     local previousMovementCleanup = RuntimeEnvironment.uorkeeMovementCleanup
     if type(previousMovementCleanup) == "function" then
@@ -237,6 +244,7 @@ local Settings = {
 
     ESPEnabled = true,
     NamesESP = true,
+    BoundaryESPEnabled = true,
     DeathStatueEnabled = true,
     DeathStatueText = "REST IN NEON — {player}",
     AntiZoomEnabled = true,
@@ -330,7 +338,7 @@ local requestVictoryMusicEvaluation
 
 local ConfigKeys = {
     "TeamCheck",
-    "ESPEnabled", "NamesESP", "DeathStatueEnabled", "DeathStatueText",
+    "ESPEnabled", "NamesESP", "BoundaryESPEnabled", "DeathStatueEnabled", "DeathStatueText",
     "AntiZoomEnabled", "AntiZoomFOV", "CustomScopeEnabled",
     "AimbotEnabled", "TriggerbotEnabled", "TriggerDelay",
     "CombatNotificationsEnabled",
@@ -390,6 +398,7 @@ RuntimeEnvironment.uorkeeConfigSections = {
     Visuals = {
         ESPEnabled = true,
         NamesESP = true,
+        BoundaryESPEnabled = true,
         DeathStatueEnabled = true,
         DeathStatueText = true,
         AntiZoomEnabled = true,
@@ -2090,6 +2099,11 @@ end, "CustomScopeEnabled")
 addSection("--- ESP SETTINGS ---")
 addToggle("Enable ESP", Settings.ESPEnabled, function(value) Settings.ESPEnabled = value end, "ESPEnabled")
 addToggle("Names ESP", Settings.NamesESP, function(value) Settings.NamesESP = value end, "NamesESP")
+addToggle("Map Boundary ESP [diagnostic]", Settings.BoundaryESPEnabled, function(value)
+    Settings.BoundaryESPEnabled = value
+    local setter = RuntimeEnvironment.uorkeeSetBoundaryESP
+    if type(setter) == "function" then setter(value) end
+end, "BoundaryESPEnabled")
 addSection("--- DEATH STATUE ---")
 addToggle("Neon Statue On Death", Settings.DeathStatueEnabled, function(value)
     Settings.DeathStatueEnabled = value
@@ -2510,6 +2524,379 @@ RuntimeEnvironment.uorkeeAmbientModeCleanup = function()
     end
 end
 RuntimeEnvironment.uorkeeSetAmbientMode(Settings.AmbientModeEnabled)
+
+do
+    RuntimeEnvironment.uorkeeBoundaryState = {
+        Alive = true,
+        Enabled = false,
+        Refreshing = false,
+        NextRefresh = 0,
+        Markers = {},
+        Approximate = {},
+        Connections = {},
+        DetectedParts = {},
+        Bounds = nil,
+        UsingApproximate = false,
+        CollectionService = game:GetService("CollectionService"),
+        Folder = create("Folder", workspace, {Name = "uorkeeBoundaryVisuals"}),
+    }
+
+    RuntimeEnvironment.uorkeeBoundaryState.MatchText = function(value)
+        local text = string.lower(tostring(value or "")):gsub("[%s_%-%.%/]", "")
+        for _, keyword in ipairs({
+            "outofbound", "boundary", "killzone", "killpart", "killbrick",
+            "killplane", "deathzone", "deadzone", "damagezone", "lethal",
+            "mapedge", "worldedge", "void", "barrier", "borderwall",
+        }) do
+            if string.find(text, keyword, 1, true) then return true end
+        end
+        return false
+    end
+
+    RuntimeEnvironment.uorkeeBoundaryState.IsIgnored = function(part)
+        local state = RuntimeEnvironment.uorkeeBoundaryState
+        if not state or not part or not part:IsA("BasePart") then return true end
+        if state.Folder and part:IsDescendantOf(state.Folder) then return true end
+
+        local cursor = part
+        while cursor and cursor ~= workspace do
+            local name = string.lower(cursor.Name)
+            if string.sub(name, 1, 6) == "uorkee"
+                or name == "kesicihubv2"
+                or name == "camera" then
+                return true
+            end
+            cursor = cursor.Parent
+        end
+
+        local characterModel = part:FindFirstAncestorOfClass("Model")
+        return characterModel and Players:GetPlayerFromCharacter(characterModel) ~= nil
+    end
+
+    RuntimeEnvironment.uorkeeBoundaryState.HasBoundarySignal = function(part)
+        local state = RuntimeEnvironment.uorkeeBoundaryState
+        if not state or state.IsIgnored(part) then return false end
+
+        local cursor = part
+        for _ = 1, 6 do
+            if not cursor or cursor == workspace then break end
+            if state.MatchText(cursor.Name) then return true end
+
+            for attributeName, attributeValue in pairs(cursor:GetAttributes()) do
+                if state.MatchText(attributeName)
+                    and attributeValue ~= false
+                    and attributeValue ~= 0
+                    and attributeValue ~= "" then
+                    return true
+                end
+                if type(attributeValue) == "string" and state.MatchText(attributeValue) then
+                    return true
+                end
+            end
+
+            local ok, tags = pcall(state.CollectionService.GetTags, state.CollectionService, cursor)
+            if ok and type(tags) == "table" then
+                for _, tag in ipairs(tags) do
+                    if state.MatchText(tag) then return true end
+                end
+            end
+            cursor = cursor.Parent
+        end
+
+        local size = part.Size
+        local floorVolume = size.X >= 45 and size.Z >= 45 and size.Y <= 18
+        local wallVolume = size.Y >= 18
+            and math.max(size.X, size.Z) >= 28
+            and math.min(size.X, size.Z) <= 12
+        return part.Anchored
+            and part.CanTouch
+            and part.Transparency >= 0.92
+            and (floorVolume or wallVolume)
+    end
+
+    RuntimeEnvironment.uorkeeBoundaryState.IsMapGeometry = function(part, root)
+        local state = RuntimeEnvironment.uorkeeBoundaryState
+        if not state or state.IsIgnored(part) or not root then return false end
+        if not part.Anchored or not part.CanCollide or part.Transparency >= 0.98 then return false end
+        if part.Size.X > 1200 or part.Size.Y > 500 or part.Size.Z > 1200 then return false end
+        if math.abs(part.Position.Y - root.Position.Y) > 180 then return false end
+        local horizontal = Vector2.new(
+            part.Position.X - root.Position.X,
+            part.Position.Z - root.Position.Z
+        ).Magnitude
+        return horizontal <= 620 + math.max(part.Size.X, part.Size.Z) * 0.5
+    end
+
+    RuntimeEnvironment.uorkeeBoundaryState.CreateMarker = function(part)
+        local state = RuntimeEnvironment.uorkeeBoundaryState
+        if not state or not state.Alive or not part or not part.Parent then return end
+        local color = themeColor()
+        local fill = create("BoxHandleAdornment", state.Folder, {
+            Name = "DetectedBoundaryFill",
+            Adornee = part,
+            AlwaysOnTop = true,
+            Size = part.Size + Vector3.new(0.12, 0.12, 0.12),
+            Color3 = color,
+            Transparency = 0.78,
+            ZIndex = 8,
+        })
+        local outline = create("SelectionBox", state.Folder, {
+            Name = "DetectedBoundaryOutline",
+            Adornee = part,
+            Color3 = color,
+            SurfaceColor3 = color,
+            SurfaceTransparency = 0.9,
+            LineThickness = 0.055,
+        })
+        state.Markers[part] = {
+            Fill = fill,
+            Outline = outline,
+        }
+    end
+
+    RuntimeEnvironment.uorkeeBoundaryState.ClearApproximate = function()
+        local state = RuntimeEnvironment.uorkeeBoundaryState
+        if not state then return end
+        for _, data in ipairs(state.Approximate) do
+            if data.Outline then pcall(function() data.Outline:Destroy() end) end
+            if data.Part then pcall(function() data.Part:Destroy() end) end
+        end
+        table.clear(state.Approximate)
+    end
+
+    RuntimeEnvironment.uorkeeBoundaryState.CreateApproximateWall = function(name, size, position)
+        local state = RuntimeEnvironment.uorkeeBoundaryState
+        if not state or not state.Folder then return end
+        local color = themeColor()
+        local part = create("Part", state.Folder, {
+            Name = name,
+            Size = size,
+            CFrame = CFrame.new(position),
+            Anchored = true,
+            CanCollide = false,
+            CanTouch = false,
+            CanQuery = false,
+            CastShadow = false,
+            Material = Enum.Material.Neon,
+            Color = color:Lerp(Color3.new(0, 0, 0), 0.16),
+            Transparency = 0.83,
+        })
+        local outline = create("SelectionBox", state.Folder, {
+            Name = name .. "Outline",
+            Adornee = part,
+            Color3 = color,
+            SurfaceColor3 = color,
+            SurfaceTransparency = 0.94,
+            LineThickness = 0.045,
+        })
+        table.insert(state.Approximate, {Part = part, Outline = outline})
+    end
+
+    RuntimeEnvironment.uorkeeBoundaryState.BuildApproximate = function(bounds)
+        local state = RuntimeEnvironment.uorkeeBoundaryState
+        if not state or not bounds then return end
+        local width = bounds.MaxX - bounds.MinX
+        local depth = bounds.MaxZ - bounds.MinZ
+        if width < 24 or depth < 24 or width > 1400 or depth > 1400 then return end
+
+        local margin = 4
+        local height = math.clamp(bounds.MaxY - bounds.MinY + 34, 34, 190)
+        local centreY = bounds.MinY + height * 0.5 - 5
+        local centreX = (bounds.MinX + bounds.MaxX) * 0.5
+        local centreZ = (bounds.MinZ + bounds.MaxZ) * 0.5
+        state.CreateApproximateWall(
+            "ApproxBoundaryWest",
+            Vector3.new(0.65, height, depth + margin * 2),
+            Vector3.new(bounds.MinX - margin, centreY, centreZ)
+        )
+        state.CreateApproximateWall(
+            "ApproxBoundaryEast",
+            Vector3.new(0.65, height, depth + margin * 2),
+            Vector3.new(bounds.MaxX + margin, centreY, centreZ)
+        )
+        state.CreateApproximateWall(
+            "ApproxBoundaryNorth",
+            Vector3.new(width + margin * 2, height, 0.65),
+            Vector3.new(centreX, centreY, bounds.MinZ - margin)
+        )
+        state.CreateApproximateWall(
+            "ApproxBoundarySouth",
+            Vector3.new(width + margin * 2, height, 0.65),
+            Vector3.new(centreX, centreY, bounds.MaxZ + margin)
+        )
+    end
+
+    RuntimeEnvironment.uorkeeBoundaryState.Refresh = function()
+        local state = RuntimeEnvironment.uorkeeBoundaryState
+        if not state or not state.Alive or not state.Enabled or state.Refreshing then return end
+        state.Refreshing = true
+
+        local character = LocalPlayer.Character
+        local root = character and character:FindFirstChild("HumanoidRootPart")
+        local seen = {}
+        local detectedCount = 0
+        local minX, maxX, minY, maxY, minZ, maxZ
+
+        for _, object in ipairs(workspace:GetDescendants()) do
+            if object:IsA("BasePart") and not state.IsIgnored(object) then
+                local nearCurrentMap = not root
+                    or (Vector2.new(
+                        object.Position.X - root.Position.X,
+                        object.Position.Z - root.Position.Z
+                    ).Magnitude <= 760 + math.max(object.Size.X, object.Size.Z) * 0.5)
+
+                if nearCurrentMap and state.HasBoundarySignal(object) then
+                    seen[object] = true
+                    detectedCount += 1
+                    if not state.Markers[object] then state.CreateMarker(object) end
+                end
+
+                if state.IsMapGeometry(object, root) then
+                    local half = object.Size * 0.5
+                    local frame = object.CFrame
+                    local extentX = math.abs(frame.RightVector.X) * half.X
+                        + math.abs(frame.UpVector.X) * half.Y
+                        + math.abs(frame.LookVector.X) * half.Z
+                    local extentY = math.abs(frame.RightVector.Y) * half.X
+                        + math.abs(frame.UpVector.Y) * half.Y
+                        + math.abs(frame.LookVector.Y) * half.Z
+                    local extentZ = math.abs(frame.RightVector.Z) * half.X
+                        + math.abs(frame.UpVector.Z) * half.Y
+                        + math.abs(frame.LookVector.Z) * half.Z
+                    minX = math.min(minX or math.huge, object.Position.X - extentX)
+                    maxX = math.max(maxX or -math.huge, object.Position.X + extentX)
+                    minY = math.min(minY or math.huge, object.Position.Y - extentY)
+                    maxY = math.max(maxY or -math.huge, object.Position.Y + extentY)
+                    minZ = math.min(minZ or math.huge, object.Position.Z - extentZ)
+                    maxZ = math.max(maxZ or -math.huge, object.Position.Z + extentZ)
+                end
+            end
+        end
+
+        for source, data in pairs(state.Markers) do
+            if not seen[source] or not source.Parent then
+                if data.Fill then pcall(function() data.Fill:Destroy() end) end
+                if data.Outline then pcall(function() data.Outline:Destroy() end) end
+                state.Markers[source] = nil
+            elseif data.Fill then
+                data.Fill.Size = source.Size + Vector3.new(0.12, 0.12, 0.12)
+            end
+        end
+
+        state.ClearApproximate()
+        state.DetectedParts = seen
+        state.UsingApproximate = detectedCount == 0
+        state.Bounds = minX and {
+            MinX = minX, MaxX = maxX,
+            MinY = minY, MaxY = maxY,
+            MinZ = minZ, MaxZ = maxZ,
+        } or nil
+        if state.UsingApproximate then state.BuildApproximate(state.Bounds) end
+        state.Refreshing = false
+    end
+
+    RuntimeEnvironment.uorkeeBoundaryState.UpdateColor = function(color)
+        local state = RuntimeEnvironment.uorkeeBoundaryState
+        if not state or not state.Alive then return end
+        color = color or themeColor()
+        for _, data in pairs(state.Markers) do
+            if data.Fill then data.Fill.Color3 = color end
+            if data.Outline then
+                data.Outline.Color3 = color
+                data.Outline.SurfaceColor3 = color
+            end
+        end
+        for _, data in ipairs(state.Approximate) do
+            if data.Part then data.Part.Color = color:Lerp(Color3.new(0, 0, 0), 0.16) end
+            if data.Outline then
+                data.Outline.Color3 = color
+                data.Outline.SurfaceColor3 = color
+            end
+        end
+    end
+
+    RuntimeEnvironment.uorkeeSetBoundaryESP = function(enabled)
+        local state = RuntimeEnvironment.uorkeeBoundaryState
+        if not state or not state.Alive then return end
+        state.Enabled = enabled == true
+        if state.Enabled then
+            state.NextRefresh = 0
+            task.defer(state.Refresh)
+        else
+            for _, data in pairs(state.Markers) do
+                if data.Fill then pcall(function() data.Fill:Destroy() end) end
+                if data.Outline then pcall(function() data.Outline:Destroy() end) end
+            end
+            table.clear(state.Markers)
+            table.clear(state.DetectedParts)
+            state.ClearApproximate()
+            state.Bounds = nil
+            state.UsingApproximate = false
+        end
+    end
+    RuntimeEnvironment.uorkeeBoundaryState.SetEnabled = RuntimeEnvironment.uorkeeSetBoundaryESP
+
+    RuntimeEnvironment.uorkeeBoundaryState.Connections[1] = RunService.Heartbeat:Connect(function()
+        local state = RuntimeEnvironment.uorkeeBoundaryState
+        if not state or not state.Alive or not state.Enabled then return end
+        local now = os.clock()
+        local pulse = (math.sin(now * 3.2) + 1) * 0.5
+        for _, data in pairs(state.Markers) do
+            if data.Fill then data.Fill.Transparency = 0.72 + pulse * 0.1 end
+            if data.Outline then data.Outline.SurfaceTransparency = 0.86 + pulse * 0.08 end
+        end
+        for _, data in ipairs(state.Approximate) do
+            if data.Part then data.Part.Transparency = 0.78 + pulse * 0.1 end
+            if data.Outline then data.Outline.SurfaceTransparency = 0.9 + pulse * 0.06 end
+        end
+        if now >= state.NextRefresh then
+            state.NextRefresh = now + 4
+            task.defer(state.Refresh)
+        end
+    end)
+    RuntimeEnvironment.uorkeeBoundaryState.Connections[2] = workspace.DescendantRemoving:Connect(function(object)
+        local state = RuntimeEnvironment.uorkeeBoundaryState
+        local data = state and state.Markers[object]
+        if not data then return end
+        if data.Fill then pcall(function() data.Fill:Destroy() end) end
+        if data.Outline then pcall(function() data.Outline:Destroy() end) end
+        state.Markers[object] = nil
+        state.DetectedParts[object] = nil
+    end)
+    RuntimeEnvironment.uorkeeBoundaryState.Connections[3] = workspace.ChildAdded:Connect(function()
+        local state = RuntimeEnvironment.uorkeeBoundaryState
+        if state and state.Alive and state.Enabled then state.NextRefresh = 0 end
+    end)
+    RuntimeEnvironment.uorkeeBoundaryState.Connections[4] = LocalPlayer.CharacterAdded:Connect(function()
+        local state = RuntimeEnvironment.uorkeeBoundaryState
+        if state and state.Alive and state.Enabled then state.NextRefresh = 0 end
+    end)
+
+    registerRefresh(function(color)
+        local state = RuntimeEnvironment.uorkeeBoundaryState
+        if state and state.UpdateColor then state.UpdateColor(color) end
+    end)
+
+    RuntimeEnvironment.uorkeeBoundaryCleanup = function()
+        local state = RuntimeEnvironment.uorkeeBoundaryState
+        if not state then return end
+        state.Alive = false
+        for _, connection in ipairs(state.Connections) do
+            pcall(function() connection:Disconnect() end)
+        end
+        table.clear(state.Connections)
+        if state.Folder then pcall(function() state.Folder:Destroy() end) end
+        if RuntimeEnvironment.uorkeeSetBoundaryESP == state.SetEnabled then
+            RuntimeEnvironment.uorkeeSetBoundaryESP = nil
+        end
+        if RuntimeEnvironment.uorkeeBoundaryState == state then
+            RuntimeEnvironment.uorkeeBoundaryState = nil
+            RuntimeEnvironment.uorkeeBoundaryCleanup = nil
+        end
+    end
+
+    RuntimeEnvironment.uorkeeSetBoundaryESP(Settings.BoundaryESPEnabled)
+end
 
 local PlayerESP = {}
 local stopped = false
@@ -4968,6 +5355,8 @@ MenuUI.terminate = function()
     end
     local ambientCleanup = RuntimeEnvironment.uorkeeAmbientModeCleanup
     if type(ambientCleanup) == "function" then pcall(ambientCleanup) end
+    local boundaryCleanup = RuntimeEnvironment.uorkeeBoundaryCleanup
+    if type(boundaryCleanup) == "function" then pcall(boundaryCleanup) end
     if type(RuntimeEnvironment.uorkeeMovementCleanup) == "function" then
         pcall(RuntimeEnvironment.uorkeeMovementCleanup)
     end
