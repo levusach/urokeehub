@@ -4044,7 +4044,11 @@ local function closestTarget()
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and not sameTeam(player) then
             local character = characterInfo(player)
-            local head = character and character:FindFirstChild("Head")
+            local head = character and (
+                character:FindFirstChild("HitboxHead")
+                or character:FindFirstChild("PhysicalHitboxHead")
+                or character:FindFirstChild("Head")
+            )
             if head and isVisible(character, head) then
                 -- World-space scoring deliberately has no on-screen/FOV gate.
                 -- A target behind the camera is therefore still a valid target.
@@ -4273,21 +4277,28 @@ RunService:BindToRenderStep("uorkeeTriggerbot", Enum.RenderPriority.Camera.Value
     local character = characterInfo(player)
     if not character then return end
 
-    local head = character:FindFirstChild("Head")
-    if not head or (aimedHead and aimedHead ~= head) then return end
+    local head = aimedHead
+        or character:FindFirstChild("HitboxHead")
+        or character:FindFirstChild("PhysicalHitboxHead")
+        or character:FindFirstChild("Head")
+    if not head or not head:IsDescendantOf(character) then return end
 
-    -- Lerp approaches its target gradually. Wait until the head is genuinely
-    -- under the centre crosshair instead of firing during the camera sweep.
-    local projected, onScreen = Camera:WorldToViewportPoint(head.Position)
+    -- When the aimbot owns the target, finish the last fraction of the camera
+    -- movement in this frame. A tiny one-frame lead compensates for the input
+    -- event being consumed after RenderStepped without aiming outside the head.
+    local origin = Camera.CFrame.Position
+    local aimPosition = head.Position
+    if aimedHead then
+        local velocity = head.AssemblyLinearVelocity
+        aimPosition += velocity * math.clamp(1 / 90, 0, 0.014)
+        Camera.CFrame = CFrame.new(origin, aimPosition)
+    end
+
+    local projected, onScreen = Camera:WorldToViewportPoint(aimPosition)
     if not onScreen or projected.Z <= 0 then return end
     local centre = viewportCenter()
     local aimError = (Vector2.new(projected.X, projected.Y) - centre).Magnitude
-    local edge = Camera:WorldToViewportPoint(
-        head.Position + Camera.CFrame.RightVector * math.max(head.Size.X * 0.5, 0.25)
-    )
-    local projectedRadius = math.abs(edge.X - projected.X)
-    local allowedError = math.clamp(projectedRadius * 0.18, 1.25, 3.5)
-    if aimError > allowedError then return end
+    if aimError > (aimedHead and 0.85 or 2.25) then return end
 
     -- Always perform this obstruction check for trigger shots, independently
     -- of the optional aimbot wall-check setting.
@@ -4295,8 +4306,7 @@ RunService:BindToRenderStep("uorkeeTriggerbot", Enum.RenderPriority.Camera.Value
     raycastParameters.FilterType = Enum.RaycastFilterType.Exclude
     raycastParameters.FilterDescendantsInstances = {LocalPlayer.Character}
     raycastParameters.IgnoreWater = true
-    local origin = Camera.CFrame.Position
-    local hit = workspace:Raycast(origin, head.Position - origin, raycastParameters)
+    local hit = workspace:Raycast(origin, aimPosition - origin, raycastParameters)
     if not hit or not hit.Instance or not hit.Instance:IsDescendantOf(character) then return end
 
     local now = os.clock()
