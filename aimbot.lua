@@ -3817,6 +3817,8 @@ do
         Original = nil,
         Camera = nil,
         Connections = {},
+        VisibilityCharacter = nil,
+        OriginalLocalTransparency = setmetatable({}, {__mode = "k"}),
     }
     RuntimeEnvironment.uorkeeThirdPersonState = state
 
@@ -3843,7 +3845,20 @@ do
         RuntimeEnvironment.uorkeeOriginalCameraSettings = state.Original
     end
 
+    state.RestoreVisibility = function()
+        for object, originalTransparency in pairs(state.OriginalLocalTransparency) do
+            pcall(function()
+                if object.Parent then
+                    object.LocalTransparencyModifier = originalTransparency
+                end
+            end)
+        end
+        table.clear(state.OriginalLocalTransparency)
+        state.VisibilityCharacter = nil
+    end
+
     state.Restore = function()
+        state.RestoreVisibility()
         if not state.Original then
             state.Applied = false
             return
@@ -3952,6 +3967,22 @@ do
             local focusPart = character and (character:FindFirstChild("Head") or root)
             if not currentCamera or not humanoid or humanoid.Health <= 0
                 or not root or not focusPart then return end
+
+            if state.VisibilityCharacter ~= character then
+                state.RestoreVisibility()
+                state.VisibilityCharacter = character
+            end
+            for _, descendant in ipairs(character:GetDescendants()) do
+                if descendant:IsA("BasePart") or descendant:IsA("Decal") then
+                    pcall(function()
+                        if state.OriginalLocalTransparency[descendant] == nil then
+                            state.OriginalLocalTransparency[descendant] =
+                                descendant.LocalTransparencyModifier
+                        end
+                        descendant.LocalTransparencyModifier = 0
+                    end)
+                end
+            end
 
             pcall(function()
                 currentCamera.CameraType = Enum.CameraType.Custom
