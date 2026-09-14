@@ -268,8 +268,6 @@ local Settings = {
     AmbientTintStrength = 0.24,
     AmbientParticleRate = 34,
     NoclipEnabled = false,
-    SpeedEnabled = false,
-    SpeedValue = 32,
     InfiniteJumpEnabled = true,
     ForceThirdPersonEnabled = false,
     ThirdPersonDistance = 8,
@@ -295,8 +293,6 @@ local Settings = {
     TriggerbotBindMode = "Toggle",
     NoclipKey = Enum.KeyCode.N,
     NoclipBindMode = "Toggle",
-    SpeedKey = Enum.KeyCode.V,
-    SpeedBindMode = "Toggle",
     ThirdPersonKey = Enum.KeyCode.H,
     ThirdPersonBindMode = "Toggle",
     TeleportOffset = 3,
@@ -347,14 +343,14 @@ local ConfigKeys = {
     "VictoryMusicId4", "VictoryMusicStartOffset4",
     "VictoryMusicId5", "VictoryMusicStartOffset5",
     "AmbientModeEnabled", "AmbientTintStrength", "AmbientParticleRate",
-    "NoclipEnabled", "SpeedEnabled", "SpeedValue", "InfiniteJumpEnabled",
+    "NoclipEnabled", "InfiniteJumpEnabled",
     "ForceThirdPersonEnabled", "ThirdPersonDistance",
     "FakeLagEnabled", "FakeLagHold", "FakeLagRelease",
     "WallCheck", "ShowFOV", "RainbowFOV", "FOVRadius", "AimSpeed",
     "MenuOpacity", "Red", "Green", "Blue",
     "MenuKey", "TeleportKey", "TeleportBindMode",
     "AimbotKey", "AimbotBindMode", "TriggerbotKey", "TriggerbotBindMode",
-    "NoclipKey", "NoclipBindMode", "SpeedKey", "SpeedBindMode",
+    "NoclipKey", "NoclipBindMode",
     "ThirdPersonKey", "ThirdPersonBindMode",
     "TeleportOffset", "TeleportWhitelist",
 }
@@ -402,8 +398,6 @@ RuntimeEnvironment.uorkeeConfigSections = {
     },
     Movement = {
         NoclipEnabled = true,
-        SpeedEnabled = true,
-        SpeedValue = true,
         InfiniteJumpEnabled = true,
         ForceThirdPersonEnabled = true,
         ThirdPersonDistance = true,
@@ -423,8 +417,6 @@ RuntimeEnvironment.uorkeeConfigSections = {
         TriggerbotBindMode = true,
         NoclipKey = true,
         NoclipBindMode = true,
-        SpeedKey = true,
-        SpeedBindMode = true,
         ThirdPersonKey = true,
         ThirdPersonBindMode = true,
     },
@@ -457,7 +449,6 @@ local BindingSettingKeys = {
     AimbotKey = true,
     TriggerbotKey = true,
     NoclipKey = true,
-    SpeedKey = true,
     ThirdPersonKey = true,
 }
 
@@ -466,7 +457,6 @@ local BindModeSettingKeys = {
     AimbotBindMode = true,
     TriggerbotBindMode = true,
     NoclipBindMode = true,
-    SpeedBindMode = true,
     ThirdPersonBindMode = true,
 }
 
@@ -1994,9 +1984,6 @@ local function addBindControl(label, bindingSetting, modeSetting)
         elseif modeSetting == "NoclipBindMode" then
             local state = RuntimeEnvironment.uorkeeMovementState
             if state then state.NoclipHeld = false end
-        elseif modeSetting == "SpeedBindMode" then
-            local state = RuntimeEnvironment.uorkeeMovementState
-            if state then state.SpeedHeld = false end
         elseif modeSetting == "ThirdPersonBindMode" then
             local state = RuntimeEnvironment.uorkeeThirdPersonState
             if state then state.Held = false end
@@ -2023,7 +2010,6 @@ addBindControl("Teleport", "TeleportKey", "TeleportBindMode")
 addBindControl("Aimbot", "AimbotKey", "AimbotBindMode")
 addBindControl("Triggerbot", "TriggerbotKey", "TriggerbotBindMode")
 addBindControl("Noclip", "NoclipKey", "NoclipBindMode")
-addBindControl("Speed", "SpeedKey", "SpeedBindMode")
 addBindControl("Third Person", "ThirdPersonKey", "ThirdPersonBindMode")
 
 refreshKeyButtons = function()
@@ -2071,12 +2057,6 @@ addSection("--- MOVEMENT ---")
 addToggle("Noclip", Settings.NoclipEnabled, function(value)
     Settings.NoclipEnabled = value
 end, "NoclipEnabled")
-addToggle("Speed Boost", Settings.SpeedEnabled, function(value)
-    Settings.SpeedEnabled = value
-end, "SpeedEnabled")
-addSlider("Walk Speed: ", 16, 100, Settings.SpeedValue, 0, function(value)
-    Settings.SpeedValue = value
-end, "SpeedValue")
 addToggle("Infinite Jump", Settings.InfiniteJumpEnabled, function(value)
     Settings.InfiniteJumpEnabled = value
 end, "InfiniteJumpEnabled")
@@ -4344,11 +4324,8 @@ do
     local state = {
         Alive = true,
         NoclipHeld = false,
-        SpeedHeld = false,
         NoclipCharacter = nil,
         OriginalCollisions = setmetatable({}, {__mode = "k"}),
-        SpeedHumanoid = nil,
-        OriginalWalkSpeed = nil,
         Connection = nil,
     }
     RuntimeEnvironment.uorkeeMovementState = state
@@ -4358,13 +4335,6 @@ do
             return state.NoclipHeld
         end
         return Settings.NoclipEnabled
-    end
-
-    state.SpeedActive = function()
-        if Settings.SpeedBindMode == "Hold" then
-            return state.SpeedHeld
-        end
-        return Settings.SpeedEnabled
     end
 
     state.RestoreNoclip = function()
@@ -4379,18 +4349,6 @@ do
         state.NoclipCharacter = nil
     end
 
-    state.RestoreSpeed = function()
-        if state.SpeedHumanoid and state.OriginalWalkSpeed ~= nil then
-            pcall(function()
-                if state.SpeedHumanoid.Parent then
-                    state.SpeedHumanoid.WalkSpeed = state.OriginalWalkSpeed
-                end
-            end)
-        end
-        state.SpeedHumanoid = nil
-        state.OriginalWalkSpeed = nil
-    end
-
     state.Cleanup = function()
         if not state.Alive then return end
         state.Alive = false
@@ -4399,7 +4357,6 @@ do
             state.Connection = nil
         end
         state.RestoreNoclip()
-        state.RestoreSpeed()
         if RuntimeEnvironment.uorkeeMovementState == state then
             RuntimeEnvironment.uorkeeMovementState = nil
             RuntimeEnvironment.uorkeeMovementCleanup = nil
@@ -4426,18 +4383,6 @@ do
             end
         elseif state.NoclipCharacter then
             state.RestoreNoclip()
-        end
-
-        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-        if state.SpeedActive() and humanoid and humanoid.Health > 0 then
-            if state.SpeedHumanoid ~= humanoid then
-                state.RestoreSpeed()
-                state.SpeedHumanoid = humanoid
-                state.OriginalWalkSpeed = humanoid.WalkSpeed
-            end
-            humanoid.WalkSpeed = Settings.SpeedValue
-        elseif state.SpeedHumanoid then
-            state.RestoreSpeed()
         end
     end)
 end
@@ -5136,17 +5081,6 @@ MainInputConnection = UserInputService.InputBegan:Connect(function(input, gamePr
         end
     end
 
-    if InputHelpers.Matches(input, Settings.SpeedKey) then
-        local state = RuntimeEnvironment.uorkeeMovementState
-        if state then
-            if Settings.SpeedBindMode == "Hold" then
-                state.SpeedHeld = true
-            else
-                InputHelpers.ToggleSetting("SpeedEnabled")
-            end
-        end
-    end
-
     if InputHelpers.Matches(input, Settings.ThirdPersonKey) then
         local state = RuntimeEnvironment.uorkeeThirdPersonState
         if state then
@@ -5180,10 +5114,6 @@ MainInputEndedConnection = UserInputService.InputEnded:Connect(function(input)
     if InputHelpers.Matches(input, Settings.NoclipKey) then
         local state = RuntimeEnvironment.uorkeeMovementState
         if state then state.NoclipHeld = false end
-    end
-    if InputHelpers.Matches(input, Settings.SpeedKey) then
-        local state = RuntimeEnvironment.uorkeeMovementState
-        if state then state.SpeedHeld = false end
     end
     if InputHelpers.Matches(input, Settings.ThirdPersonKey) then
         local state = RuntimeEnvironment.uorkeeThirdPersonState
