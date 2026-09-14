@@ -777,22 +777,37 @@ local function addStroke(parent, color, thickness, transparency)
     })
 end
 
+local GlassPalette = {
+    Base = Color3.fromRGB(17, 17, 21),
+    Surface = Color3.fromRGB(31, 31, 37),
+    Raised = Color3.fromRGB(43, 43, 50),
+    Text = Color3.fromRGB(247, 247, 250),
+    SecondaryText = Color3.fromRGB(174, 174, 184),
+    TertiaryText = Color3.fromRGB(124, 124, 135),
+    Hairline = Color3.fromRGB(255, 255, 255),
+}
+
 local function glassTransparency()
-    return math.clamp(0.12 + Settings.MenuOpacity * 0.7, 0.12, 0.82)
+    return math.clamp(0.16 + Settings.MenuOpacity * 0.56, 0.16, 0.72)
 end
 
 local function menuTransparency()
-    -- Keep enough dark backing for readable text even over a bright scene.
-    return 0.06 + math.clamp(Settings.MenuOpacity, 0, 1) * 0.22
+    -- Roblox has no per-frame backdrop blur, so a restrained dark tint keeps
+    -- the translucent material readable without looking like an opaque panel.
+    return 0.12 + math.clamp(Settings.MenuOpacity, 0, 1) * 0.30
 end
 
 local function liquidColors(accent, darkness)
-    darkness = darkness or 0.72
-    local dark = Color3.fromRGB(12, 15, 24)
+    darkness = darkness or 0.84
+    local base = GlassPalette.Base
+    local tint = math.clamp((1 - darkness) * 0.34, 0.018, 0.085)
+    local upper = GlassPalette.Raised:Lerp(accent, tint)
+    local middle = GlassPalette.Surface:Lerp(accent, tint * 0.72)
+    local lower = base:Lerp(accent, tint * 0.48)
     return ColorSequence.new({
-        ColorSequenceKeypoint.new(0, accent:Lerp(dark, darkness)),
-        ColorSequenceKeypoint.new(0.48, dark),
-        ColorSequenceKeypoint.new(1, accent:Lerp(dark, math.max(0.48, darkness - 0.12))),
+        ColorSequenceKeypoint.new(0, upper),
+        ColorSequenceKeypoint.new(0.38, middle),
+        ColorSequenceKeypoint.new(1, lower),
     })
 end
 
@@ -808,12 +823,12 @@ end
 
 local function addLiquidHover(object, normalTransparency, hoverTransparency)
     object.MouseEnter:Connect(function()
-        TweenService:Create(object, TweenInfo.new(0.16, Enum.EasingStyle.Quint), {
+        TweenService:Create(object, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             BackgroundTransparency = hoverTransparency,
         }):Play()
     end)
     object.MouseLeave:Connect(function()
-        TweenService:Create(object, TweenInfo.new(0.22, Enum.EasingStyle.Quint), {
+        TweenService:Create(object, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             BackgroundTransparency = normalTransparency,
         }):Play()
     end)
@@ -861,33 +876,33 @@ local CustomScopeVertical = create("Frame", CustomScopeOverlay, {
 
 local MenuButton = create("TextButton", ScreenGui, {
     Name = "MenuButton",
-    Size = UDim2.new(0, 52, 0, 52),
+    Size = UDim2.new(0, 48, 0, 48),
     Position = UDim2.new(0, 18, 0, 18),
-    BackgroundColor3 = Color3.fromRGB(18, 21, 31),
-    BackgroundTransparency = 0.12,
+    BackgroundColor3 = GlassPalette.Surface,
+    BackgroundTransparency = 0.18,
     BorderSizePixel = 0,
     Text = "u",
-    TextColor3 = Color3.fromRGB(250, 250, 255),
-    TextSize = 21,
-    Font = Enum.Font.GothamBlack,
+    TextColor3 = GlassPalette.Text,
+    TextSize = 20,
+    Font = Enum.Font.GothamMedium,
     AutoButtonColor = false,
 })
-addCorner(MenuButton, 17)
-local MenuButtonStroke = addStroke(MenuButton, themeColor(), 1.4, 0.12)
+addCorner(MenuButton, 16)
+local MenuButtonStroke = addStroke(MenuButton, Color3.fromRGB(255, 255, 255), 1, 0.72)
 local MenuButtonGradient = addLiquidGradient(MenuButton, 35)
 local MenuButtonDot = create("Frame", MenuButton, {
-    Size = UDim2.new(0, 7, 0, 7),
-    Position = UDim2.new(1, -11, 0, 5),
+    Size = UDim2.new(0, 6, 0, 6),
+    Position = UDim2.new(1, -10, 0, 5),
     BackgroundColor3 = themeColor(),
     BorderSizePixel = 0,
 })
 addCorner(MenuButtonDot, 20)
-addLiquidHover(MenuButton, 0.12, 0.02)
+addLiquidHover(MenuButton, 0.18, 0.08)
 
 -- Use a Frame: CanvasGroup flattens children, so its gradient darkens all text.
 local Main = create("Frame", ScreenGui, {
     Name = "Main",
-    Size = UDim2.new(0.88, 0, 0.86, 0),
+    Size = UDim2.new(0.78, 0, 0.80, 0),
     AnchorPoint = Vector2.new(0.5, 0.5),
     Position = UDim2.new(0.5, 0, 0.5, 0),
     ZIndex = 20,
@@ -898,46 +913,72 @@ local Main = create("Frame", ScreenGui, {
     ClipsDescendants = true,
     Visible = false,
 })
-addCorner(Main, 20)
-local MainStroke = addStroke(Main, themeColor(), 1.25, 0.22)
+addCorner(Main, 26)
+create("UISizeConstraint", Main, {
+    MinSize = Vector2.new(680, 480),
+    MaxSize = Vector2.new(1280, 780),
+})
+local MainStroke = addStroke(Main, themeColor(), 1, 0.62)
+addStroke(Main, GlassPalette.Hairline, 1, 0.84)
 local MainGradient = addLiquidGradient(Main, 28)
 
 local MainGlowA = create("Frame", Main, {
-    Size = UDim2.new(0, 650, 0, 650),
-    Position = UDim2.new(0, -260, 0, -330),
+    Size = UDim2.new(0, 520, 0, 520),
+    Position = UDim2.new(0, -230, 0, -300),
     BackgroundColor3 = themeColor(),
-    BackgroundTransparency = 0.93,
+    BackgroundTransparency = 0.965,
     BorderSizePixel = 0,
     ZIndex = 1,
 })
 addCorner(MainGlowA, 999)
 local MainGlowB = create("Frame", Main, {
-    Size = UDim2.new(0, 800, 0, 800),
-    Position = UDim2.new(1, -480, 1, -400),
+    Size = UDim2.new(0, 620, 0, 620),
+    Position = UDim2.new(1, -360, 1, -310),
     BackgroundColor3 = themeColor(),
-    BackgroundTransparency = 0.95,
+    BackgroundTransparency = 0.975,
     BorderSizePixel = 0,
     ZIndex = 1,
 })
 addCorner(MainGlowB, 999)
 
+do
+    local specular = create("Frame", Main, {
+        Name = "GlassReflection",
+        Size = UDim2.fromScale(1, 0.42),
+        Position = UDim2.fromScale(0, 0),
+        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+        BackgroundTransparency = 0.88,
+        BorderSizePixel = 0,
+        ZIndex = 2,
+    })
+    addCorner(specular, 26)
+    create("UIGradient", specular, {
+        Rotation = 90,
+        Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.18),
+            NumberSequenceKeypoint.new(0.34, 0.78),
+            NumberSequenceKeypoint.new(1, 1),
+        }),
+    })
+end
+
 local HeaderGlass = create("Frame", Main, {
     Name = "HeaderGlass",
-    Size = UDim2.new(1, -32, 0, 78),
-    Position = UDim2.new(0, 16, 0, 16),
+    Size = UDim2.new(1, -28, 0, 70),
+    Position = UDim2.new(0, 14, 0, 14),
     BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-    BackgroundTransparency = 0.3,
+    BackgroundTransparency = 0.24,
     BorderSizePixel = 0,
     ZIndex = 3,
 })
-addCorner(HeaderGlass, 14)
-local HeaderStroke = addStroke(HeaderGlass, Color3.fromRGB(255, 255, 255), 1, 0.82)
+addCorner(HeaderGlass, 18)
+addStroke(HeaderGlass, GlassPalette.Hairline, 1, 0.82)
 local HeaderGradient = addLiquidGradient(HeaderGlass, 12)
 local HeaderShine = create("Frame", HeaderGlass, {
     Size = UDim2.new(1, -24, 0, 1),
     Position = UDim2.new(0, 12, 0, 1),
     BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-    BackgroundTransparency = 0.58,
+    BackgroundTransparency = 0.76,
     BorderSizePixel = 0,
     ZIndex = 4,
 })
@@ -945,20 +986,20 @@ addCorner(HeaderShine, 2)
 
 create("TextLabel", HeaderGlass, {
     Name = "Title",
-    Size = UDim2.new(1, -58, 0, 28),
-    Position = UDim2.new(0, 14, 0, 8),
+    Size = UDim2.new(1, -58, 0, 27),
+    Position = UDim2.new(0, 16, 0, 8),
     BackgroundTransparency = 1,
     Text = "uorkee hub",
-    TextColor3 = Color3.fromRGB(250, 250, 255),
-    TextSize = 23,
-    Font = Enum.Font.GothamBlack,
+    TextColor3 = GlassPalette.Text,
+    TextSize = 21,
+    Font = Enum.Font.GothamMedium,
     TextXAlignment = Enum.TextXAlignment.Left,
     ZIndex = 4,
 })
 
 local HeaderAccent = create("Frame", HeaderGlass, {
-    Size = UDim2.new(0, 28, 0, 3),
-    Position = UDim2.new(0, 14, 0, 36),
+    Size = UDim2.new(0, 22, 0, 2),
+    Position = UDim2.new(0, 16, 0, 36),
     BackgroundColor3 = themeColor(),
     BorderSizePixel = 0,
     ZIndex = 4,
@@ -967,13 +1008,13 @@ addCorner(HeaderAccent, 4)
 
 create("TextLabel", HeaderGlass, {
     Name = "Information",
-    Size = UDim2.new(1, -28, 0, 26),
-    Position = UDim2.new(0, 14, 0, 43),
+    Size = UDim2.new(1, -32, 0, 20),
+    Position = UDim2.new(0, 16, 0, 43),
     BackgroundTransparency = 1,
-    Text = "by lev_usach  /  PERSONAL CONTROL SPACE",
-    TextColor3 = Color3.fromRGB(172, 180, 198),
-    TextSize = 9,
-    Font = Enum.Font.Gotham,
+    Text = "by lev_usach",
+    TextColor3 = GlassPalette.SecondaryText,
+    TextSize = 11,
+    Font = Enum.Font.GothamMedium,
     TextXAlignment = Enum.TextXAlignment.Left,
     ZIndex = 4,
 })
@@ -981,20 +1022,21 @@ create("TextLabel", HeaderGlass, {
 local MenuUI = {Open = false, Alive = true, Serial = 0, Tweens = {}, Pages = {}, Tabs = {}, Particles = {}}
 local CloseButton = create("TextButton", HeaderGlass, {
     Name = "Close",
-    Size = UDim2.new(0, 34, 0, 34),
-    Position = UDim2.new(1, -42, 0, 8),
+    Size = UDim2.new(0, 32, 0, 32),
+    Position = UDim2.new(1, -40, 0, 8),
     BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-    BackgroundTransparency = 0.9,
+    BackgroundTransparency = 0.92,
     BorderSizePixel = 0,
-    Text = "X",
-    TextColor3 = Color3.fromRGB(222, 226, 238),
-    TextSize = 11,
-    Font = Enum.Font.GothamBold,
+    Text = "x",
+    TextColor3 = GlassPalette.SecondaryText,
+    TextSize = 19,
+    Font = Enum.Font.GothamMedium,
     AutoButtonColor = false,
     ZIndex = 5,
 })
-addCorner(CloseButton, 11)
-addLiquidHover(CloseButton, 0.9, 0.76)
+addCorner(CloseButton, 10)
+addStroke(CloseButton, GlassPalette.Hairline, 1, 0.9)
+addLiquidHover(CloseButton, 0.92, 0.82)
 CloseButton.MouseButton1Click:Connect(function()
     MenuUI.setOpen(false)
 end)
@@ -1002,40 +1044,42 @@ end)
 MenuUI.Scale = create("UIScale", Main, {Scale = 1})
 MenuUI.Sidebar = create("ScrollingFrame", Main, {
     Name = "Navigation", Position = UDim2.new(0, 16, 0, 110),
-    Size = UDim2.new(0, 210, 1, -126), BackgroundColor3 = Color3.fromRGB(12, 16, 26),
-    BackgroundTransparency = 0.18, BorderSizePixel = 0, ZIndex = 3,
+    Size = UDim2.new(0, 210, 1, -126), BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+    BackgroundTransparency = 0.26, BorderSizePixel = 0, ZIndex = 3,
     CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
     ScrollBarThickness = 0,
 })
 addCorner(MenuUI.Sidebar, 18)
-MenuUI.SideStroke = addStroke(MenuUI.Sidebar, themeColor(), 1, 0.75)
-create("UIListLayout", MenuUI.Sidebar, {Padding = UDim.new(0, 9), SortOrder = Enum.SortOrder.LayoutOrder})
+MenuUI.SideStroke = addStroke(MenuUI.Sidebar, GlassPalette.Hairline, 1, 0.86)
+MenuUI.SideGradient = addLiquidGradient(MenuUI.Sidebar, 88)
+create("UIListLayout", MenuUI.Sidebar, {Padding = UDim.new(0, 7), SortOrder = Enum.SortOrder.LayoutOrder})
 create("UIPadding", MenuUI.Sidebar, {
     PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12),
-    PaddingTop = UDim.new(0, 18), PaddingBottom = UDim.new(0, 18),
+    PaddingTop = UDim.new(0, 16), PaddingBottom = UDim.new(0, 16),
 })
 create("TextLabel", MenuUI.Sidebar, {
     Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1,
-    Text = "WORKSPACE", TextSize = 10, Font = Enum.Font.GothamBold,
-    TextColor3 = Color3.fromRGB(130, 144, 168), TextXAlignment = Enum.TextXAlignment.Left,
+    Text = "Controls", TextSize = 11, Font = Enum.Font.GothamMedium,
+    TextColor3 = GlassPalette.TertiaryText, TextXAlignment = Enum.TextXAlignment.Left,
     LayoutOrder = 0,
 })
 MenuUI.Body = create("Frame", Main, {
     Name = "PageHost", Position = UDim2.new(0, 242, 0, 110),
-    Size = UDim2.new(1, -258, 1, -126), BackgroundColor3 = Color3.fromRGB(12, 16, 26),
-    BackgroundTransparency = 0.12, BorderSizePixel = 0, ZIndex = 3, ClipsDescendants = true,
+    Size = UDim2.new(1, -258, 1, -126), BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+    BackgroundTransparency = 0.22, BorderSizePixel = 0, ZIndex = 3, ClipsDescendants = true,
 })
 addCorner(MenuUI.Body, 18)
-MenuUI.BodyStroke = addStroke(MenuUI.Body, themeColor(), 1, 0.82)
+MenuUI.BodyStroke = addStroke(MenuUI.Body, GlassPalette.Hairline, 1, 0.87)
+MenuUI.BodyGradient = addLiquidGradient(MenuUI.Body, 92)
 MenuUI.Heading = create("TextLabel", MenuUI.Body, {
     Position = UDim2.new(0, 22, 0, 16), Size = UDim2.new(1, -44, 0, 34),
-    BackgroundTransparency = 1, Text = "", TextSize = 25, Font = Enum.Font.GothamBold,
-    TextColor3 = Color3.fromRGB(240, 244, 255), TextXAlignment = Enum.TextXAlignment.Left,
+    BackgroundTransparency = 1, Text = "", TextSize = 23, Font = Enum.Font.GothamMedium,
+    TextColor3 = GlassPalette.Text, TextXAlignment = Enum.TextXAlignment.Left,
 })
 MenuUI.Caption = create("TextLabel", MenuUI.Body, {
     Position = UDim2.new(0, 22, 0, 53), Size = UDim2.new(1, -44, 0, 32),
     BackgroundTransparency = 1, Text = "", TextSize = 13, TextWrapped = true,
-    Font = Enum.Font.Gotham, TextColor3 = Color3.fromRGB(192, 202, 221),
+    Font = Enum.Font.Gotham, TextColor3 = GlassPalette.SecondaryText,
     TextXAlignment = Enum.TextXAlignment.Left,
 })
 MenuUI.Sweep = create("Frame", Main, {
@@ -1044,7 +1088,7 @@ MenuUI.Sweep = create("Frame", Main, {
 })
 
 function MenuUI.tween(object, duration, properties)
-    local tween = TweenService:Create(object, TweenInfo.new(duration, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), properties)
+    local tween = TweenService:Create(object, TweenInfo.new(duration, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), properties)
     MenuUI.Tweens[#MenuUI.Tweens + 1] = tween
     tween:Play()
 end
@@ -1052,11 +1096,16 @@ end
 function MenuUI.paintTabs()
     for id, tab in pairs(MenuUI.Tabs) do
         local selected = MenuUI.Selected == id
-        tab.Button.BackgroundColor3 = selected and themeColor():Lerp(Color3.fromRGB(20, 25, 40), 0.65) or Color3.fromRGB(24, 28, 39)
-        tab.Button.BackgroundTransparency = selected and 0.08 or 0.7
-        tab.Button.TextColor3 = selected and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(198, 208, 228)
+        tab.Button.BackgroundColor3 = selected
+            and GlassPalette.Raised:Lerp(themeColor(), 0.16)
+            or Color3.fromRGB(255, 255, 255)
+        tab.Button.BackgroundTransparency = selected and 0.32 or 0.96
+        tab.Button.TextColor3 = selected and GlassPalette.Text or GlassPalette.SecondaryText
         tab.Bar.BackgroundColor3 = themeColor()
         tab.Bar.Visible = selected
+        tab.Stroke.Color = selected and themeColor():Lerp(Color3.fromRGB(255, 255, 255), 0.62)
+            or GlassPalette.Hairline
+        tab.Stroke.Transparency = selected and 0.76 or 0.94
     end
 end
 
@@ -1068,8 +1117,8 @@ function MenuUI.select(id)
     local tab, page = MenuUI.Tabs[id], MenuUI.Pages[id]
     MenuUI.Heading.Text = tab.Title
     MenuUI.Caption.Text = tab.Caption
-    page.Position = UDim2.new(0, 14, 0, 108)
-    MenuUI.PageTween = TweenService:Create(page, TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+    page.Position = UDim2.new(0, 14, 0, 102)
+    MenuUI.PageTween = TweenService:Create(page, TweenInfo.new(0.24, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
         Position = UDim2.new(0, 14, 0, 94),
     })
     MenuUI.PageTween:Play()
@@ -1078,26 +1127,27 @@ end
 
 do
     local definitions = {
-        {"combat", "Combat", "Aimbot, triggerbot and targeting preferences"},
-        {"audio", "Audio", "Hit feedback and round victory music"},
-        {"visuals", "Visuals", "Player highlights and visibility"},
-        {"movement", "Movement", "Movement tools and timing"},
-        {"binds", "Keybinds", "Choose a key, then Hold or Toggle for each feature"},
-        {"theme", "Appearance", "Your color palette, glass and atmosphere"},
-        {"configs", "Configs", "Save your setup and restore it next session"},
+        {"combat", "Combat", "Targeting and input"},
+        {"audio", "Audio", "Hit feedback and round music"},
+        {"visuals", "Visuals", "Players and world"},
+        {"movement", "Movement", "Speed and navigation"},
+        {"binds", "Keybinds", "Keys and activation modes"},
+        {"theme", "Appearance", "Color, glass and atmosphere"},
+        {"configs", "Configs", "Local presets and autosave"},
     }
     for index, definition in ipairs(definitions) do
         local id = definition[1]
         local button = create("TextButton", MenuUI.Sidebar, {
-            Name = id, Size = UDim2.new(1, 0, 0, 52), LayoutOrder = index,
-            BackgroundColor3 = Color3.fromRGB(24, 28, 39), BackgroundTransparency = 0.7,
-            BorderSizePixel = 0, Text = string.format("   %02d    %s", index, definition[2]),
-            TextSize = 13, Font = Enum.Font.GothamBold, TextXAlignment = Enum.TextXAlignment.Left,
-            TextColor3 = Color3.fromRGB(158, 169, 192), AutoButtonColor = false,
+            Name = id, Size = UDim2.new(1, 0, 0, 46), LayoutOrder = index,
+            BackgroundColor3 = Color3.fromRGB(255, 255, 255), BackgroundTransparency = 0.96,
+            BorderSizePixel = 0, Text = "      " .. definition[2],
+            TextSize = 13, Font = Enum.Font.GothamMedium, TextXAlignment = Enum.TextXAlignment.Left,
+            TextColor3 = GlassPalette.SecondaryText, AutoButtonColor = false,
         })
-        addCorner(button, 12)
+        addCorner(button, 13)
+        local buttonStroke = addStroke(button, GlassPalette.Hairline, 1, 0.94)
         local bar = create("Frame", button, {
-            Size = UDim2.new(0, 3, 0, 22), Position = UDim2.new(0, 0, 0.5, -11),
+            Size = UDim2.new(0, 6, 0, 6), Position = UDim2.new(0, 13, 0.5, -3),
             BorderSizePixel = 0, BackgroundColor3 = themeColor(),
         })
         addCorner(bar, 3)
@@ -1112,41 +1162,45 @@ do
             PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 12), PaddingBottom = UDim.new(0, 18),
         })
         MenuUI.Pages[id] = page
-        MenuUI.Tabs[id] = {Button = button, Bar = bar, Title = definition[2], Caption = definition[3]}
+        MenuUI.Tabs[id] = {
+            Button = button, Bar = bar, Stroke = buttonStroke,
+            Title = definition[2], Caption = definition[3],
+        }
         button.MouseButton1Click:Connect(function() MenuUI.select(id) end)
         button.MouseEnter:Connect(function()
-            if MenuUI.Selected ~= id then button.BackgroundTransparency = 0.4 end
+            if MenuUI.Selected ~= id then button.BackgroundTransparency = 0.90 end
         end)
         button.MouseLeave:Connect(MenuUI.paintTabs)
     end
-    -- Layered translucent circles form asset-free soft particle halos.
-    for index = 1, 28 do
-        local size = math.random(3, 7)
+    -- A few restrained motes keep the glass alive without turning it into a
+    -- neon particle backdrop.
+    for index = 1, 12 do
+        local size = math.random(2, 4)
         local particle = create("Frame", Main, {
             Name = "GlowParticle", Size = UDim2.new(0, size, 0, size),
-            BackgroundColor3 = themeColor(), BackgroundTransparency = 0.4,
+            BackgroundColor3 = themeColor(), BackgroundTransparency = 0.72,
             BorderSizePixel = 0, ZIndex = 2, AnchorPoint = Vector2.new(0.5, 0.5),
         })
         addCorner(particle, 99)
         local halos = {}
-        for layer = 1, 4 do
+        for layer = 1, 2 do
             local halo = create("Frame", particle, {
                 AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
-                Size = UDim2.new(0, size + layer * 8, 0, size + layer * 8),
-                BackgroundColor3 = themeColor(), BackgroundTransparency = 0.94 + layer * 0.009,
+                Size = UDim2.new(0, size + layer * 10, 0, size + layer * 10),
+                BackgroundColor3 = themeColor(), BackgroundTransparency = 0.97 + layer * 0.008,
                 BorderSizePixel = 0, ZIndex = 2,
             })
             addCorner(halo, 99)
             halos[#halos + 1] = halo
         end
         MenuUI.Particles[index] = {Object = particle, Halos = halos, X = math.random(), Y = math.random(),
-            Speed = 0.008 + math.random() * 0.018, Phase = math.random() * math.pi * 2}
+            Speed = 0.004 + math.random() * 0.008, Phase = math.random() * math.pi * 2}
     end
 end
 
 function MenuUI.resize()
     local width = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize.X or 1280
-    local sidebarWidth = math.clamp(math.floor(width * 0.88 * 0.18), 150, 220)
+    local sidebarWidth = math.clamp(math.floor(width * 0.78 * 0.17), 164, 205)
     MenuUI.Sidebar.Size = UDim2.new(0, sidebarWidth, 1, -126)
     MenuUI.Body.Position = UDim2.new(0, sidebarWidth + 32, 0, 110)
     MenuUI.Body.Size = UDim2.new(1, -sidebarWidth - 48, 1, -126)
@@ -1165,26 +1219,24 @@ function MenuUI.setOpen(open)
         MenuUI.resize()
         Main.Visible = true
         MenuButton.Visible = false
-        Main.Position = UDim2.new(0.5, 0, 0.5, 24)
+        Main.Position = UDim2.new(0.5, 0, 0.5, 14)
         Main.BackgroundTransparency = 1
-        MenuUI.Scale.Scale = 0.97
-        MenuUI.Sidebar.Position = UDim2.new(0, -32, 0, 110)
-        HeaderGlass.Position = UDim2.new(0, 16, 0, -24)
-        MenuUI.Sweep.Position = UDim2.new(0, 0, 0, 0)
-        MenuUI.Sweep.BackgroundTransparency = 0.3
-        MenuUI.tween(Main, 0.36, {
+        MenuUI.Scale.Scale = 0.985
+        MenuUI.Sidebar.Position = UDim2.new(0, 7, 0, 110)
+        HeaderGlass.Position = UDim2.new(0, 14, 0, 2)
+        MenuUI.Sweep.BackgroundTransparency = 1
+        MenuUI.tween(Main, 0.34, {
             Position = UDim2.new(0.5, 0, 0.5, 0), BackgroundTransparency = menuTransparency(),
         })
-        MenuUI.tween(MenuUI.Scale, 0.55, {Scale = 1})
-        MenuUI.tween(MenuUI.Sidebar, 0.55, {Position = UDim2.new(0, 16, 0, 110)})
-        MenuUI.tween(HeaderGlass, 0.45, {Position = UDim2.new(0, 16, 0, 16)})
-        MenuUI.tween(MenuUI.Sweep, 0.8, {Position = UDim2.new(1, 0, 0, 0), BackgroundTransparency = 1})
+        MenuUI.tween(MenuUI.Scale, 0.38, {Scale = 1})
+        MenuUI.tween(MenuUI.Sidebar, 0.38, {Position = UDim2.new(0, 16, 0, 110)})
+        MenuUI.tween(HeaderGlass, 0.32, {Position = UDim2.new(0, 14, 0, 14)})
     else
-        MenuUI.tween(Main, 0.22, {
-            Position = UDim2.new(0.5, 0, 0.5, 18), BackgroundTransparency = 1,
+        MenuUI.tween(Main, 0.20, {
+            Position = UDim2.new(0.5, 0, 0.5, 10), BackgroundTransparency = 1,
         })
-        MenuUI.tween(MenuUI.Scale, 0.22, {Scale = 0.985})
-        task.delay(0.23, function()
+        MenuUI.tween(MenuUI.Scale, 0.20, {Scale = 0.99})
+        task.delay(0.21, function()
             if RuntimeEnvironment.uorkeeConfigSessionToken ~= ConfigSessionToken then return end
             if MenuUI.Alive and MenuUI.Serial == serial and not MenuUI.Open then
                 Main.Visible = false
@@ -1208,9 +1260,10 @@ RunService:BindToRenderStep("uorkeeMenuFX", Enum.RenderPriority.Last.Value, func
         particle.Object.Position = UDim2.new(
             (particle.X + math.sin(time * 0.19 + particle.Phase) * 0.055) % 1, 0,
             (particle.Y - time * particle.Speed) % 1, 0)
-        particle.Object.BackgroundTransparency = 0.35 + (math.sin(time * 1.2 + particle.Phase) + 1) * 0.2
+        particle.Object.BackgroundTransparency = 0.68
+            + (math.sin(time * 0.82 + particle.Phase) + 1) * 0.08
     end
-    MainGradient.Rotation = 28 + math.sin(time * 0.1) * 18
+    MainGradient.Rotation = 28 + math.sin(time * 0.08) * 4
 end)
 
 local Content = MenuUI.Pages.binds
@@ -1224,16 +1277,18 @@ end
 local function refreshTheme()
     local color = themeColor()
     MenuButtonDot.BackgroundColor3 = color
-    MenuButtonStroke.Color = color
+    MenuButtonStroke.Color = color:Lerp(Color3.fromRGB(255, 255, 255), 0.68)
     MenuButtonGradient.Color = liquidColors(color)
-    MainStroke.Color = color
-    MainGradient.Color = liquidColors(color, 0.76)
-    HeaderGradient.Color = liquidColors(color, 0.7)
+    MainStroke.Color = color:Lerp(Color3.fromRGB(255, 255, 255), 0.42)
+    MainGradient.Color = liquidColors(color, 0.84)
+    HeaderGradient.Color = liquidColors(color, 0.88)
     HeaderAccent.BackgroundColor3 = color
     MainGlowA.BackgroundColor3 = color
     MainGlowB.BackgroundColor3 = color
-    MenuUI.SideStroke.Color = color
-    MenuUI.BodyStroke.Color = color
+    MenuUI.SideStroke.Color = color:Lerp(Color3.fromRGB(255, 255, 255), 0.78)
+    MenuUI.BodyStroke.Color = color:Lerp(Color3.fromRGB(255, 255, 255), 0.82)
+    MenuUI.SideGradient.Color = liquidColors(color, 0.93)
+    MenuUI.BodyGradient.Color = liquidColors(color, 0.94)
     MenuUI.Sweep.BackgroundColor3 = color
     CustomScopeHorizontal.BackgroundColor3 = color
     CustomScopeVertical.BackgroundColor3 = color
@@ -1292,32 +1347,55 @@ makeDraggable(MenuButton, MenuButton)
 
 local function addSection(text)
     local cleanText = text:gsub("%-", ""):gsub("^%s+", ""):gsub("%s+$", "")
+    local friendlyNames = {
+        KEYBINDS = "Keybinds",
+        MOVEMENT = "Movement",
+        ["CAMERA PROTECTION"] = "Camera protection",
+        ["ESP SETTINGS"] = "ESP",
+        ["DEATH STATUE"] = "Death statue",
+        ["AIMBOT SETTINGS / 360 TARGETING"] = "Aimbot / 360 targeting",
+        ["HIT FEEDBACK"] = "Hit feedback",
+        ["ROUND VICTORY MUSIC"] = "Round victory music",
+        TARGETING = "Targeting",
+        ["LIQUID GLASS THEME"] = "Liquid Glass",
+        ["WORLD AMBIENT"] = "World ambient",
+        CONFIGS = "Configs",
+        ["LOAD SCOPE"] = "Load scope",
+    }
+    cleanText = friendlyNames[cleanText] or cleanText
     local label = create("TextLabel", Content, {
-        Size = UDim2.new(1, 0, 0, 38),
-        BackgroundColor3 = Color3.fromRGB(24, 28, 39),
-        BackgroundTransparency = 0.55,
+        Size = UDim2.new(1, 0, 0, 34),
+        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+        BackgroundTransparency = 1,
         BorderSizePixel = 0,
-        Text = "     " .. cleanText,
-        TextColor3 = themeColor():Lerp(Color3.fromRGB(255, 255, 255), 0.78),
+        Text = "      " .. cleanText,
+        TextColor3 = GlassPalette.SecondaryText,
         TextSize = 12,
         TextWrapped = true,
-        Font = Enum.Font.GothamBold,
+        Font = Enum.Font.GothamMedium,
         TextXAlignment = Enum.TextXAlignment.Left,
     })
-    addCorner(label, 10)
-    local stroke = addStroke(label, themeColor(), 1, 0.82)
+    local stroke = addStroke(label, GlassPalette.Hairline, 1, 1)
     local accent = create("Frame", label, {
-        Size = UDim2.new(0, 3, 0, 14),
-        Position = UDim2.new(0, 11, 0.5, -7),
+        Size = UDim2.new(0, 5, 0, 5),
+        Position = UDim2.new(0, 8, 0.5, -2),
         BackgroundColor3 = themeColor(),
         BorderSizePixel = 0,
     })
-    addCorner(accent, 4)
+    addCorner(accent, 5)
+    local divider = create("Frame", label, {
+        Size = UDim2.new(1, -8, 0, 1),
+        Position = UDim2.new(0, 4, 1, -1),
+        BackgroundColor3 = GlassPalette.Hairline,
+        BackgroundTransparency = 0.92,
+        BorderSizePixel = 0,
+    })
     registerRefresh(function(color)
         color = color or themeColor()
-        label.TextColor3 = color:Lerp(Color3.fromRGB(255, 255, 255), 0.78)
-        stroke.Color = color
+        label.TextColor3 = GlassPalette.SecondaryText
+        stroke.Color = GlassPalette.Hairline
         accent.BackgroundColor3 = color
+        divider.BackgroundColor3 = color:Lerp(GlassPalette.Hairline, 0.84)
     end)
     return label
 end
@@ -1326,49 +1404,59 @@ local function addToggle(text, initialValue, changed, settingKey)
     local enabled = initialValue
     local button = create("TextButton", Content, {
         Size = UDim2.new(1, 0, 0, 42),
-        BackgroundColor3 = Color3.fromRGB(24, 28, 39),
-        BackgroundTransparency = 0.38,
+        BackgroundColor3 = GlassPalette.Surface,
+        BackgroundTransparency = 0.34,
         BorderSizePixel = 0,
         Text = "   " .. text,
-        TextColor3 = Color3.fromRGB(232, 236, 246),
+        TextColor3 = GlassPalette.Text,
         TextSize = 13,
-        Font = Enum.Font.GothamBold,
+        Font = Enum.Font.GothamMedium,
         TextXAlignment = Enum.TextXAlignment.Left,
         AutoButtonColor = false,
     })
     addCorner(button, 12)
-    local buttonStroke = addStroke(button, themeColor(), 1, 0.78)
+    local buttonStroke = addStroke(button, GlassPalette.Hairline, 1, 0.89)
     local buttonGradient = addLiquidGradient(button, 8)
-    addLiquidHover(button, 0.38, 0.24)
+    addLiquidHover(button, 0.34, 0.23)
 
     local indicator = create("Frame", button, {
-        Size = UDim2.new(0, 36, 0, 20),
-        Position = UDim2.new(1, -48, 0.5, -10),
-        BackgroundColor3 = themeColor(),
-        BackgroundTransparency = enabled and 0.12 or 0.72,
+        Size = UDim2.new(0, 40, 0, 22),
+        Position = UDim2.new(1, -50, 0.5, -11),
+        BackgroundColor3 = enabled and themeColor() or GlassPalette.Raised,
+        BackgroundTransparency = enabled and 0.04 or 0.16,
         BorderSizePixel = 0,
     })
-    addCorner(indicator, 12)
-    local indicatorStroke = addStroke(indicator, themeColor(), 1, enabled and 0.18 or 0.62)
+    addCorner(indicator, 13)
+    local indicatorStroke = addStroke(indicator, GlassPalette.Hairline, 1, 0.78)
     local fill = create("Frame", indicator, {
-        Size = UDim2.new(0, 16, 0, 16),
-        Position = enabled and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8),
-        BackgroundColor3 = Color3.fromRGB(248, 249, 255),
+        Size = UDim2.new(0, 18, 0, 18),
+        Position = enabled and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9),
+        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
         BackgroundTransparency = 0,
         BorderSizePixel = 0,
     })
-    addCorner(fill, 10)
+    addCorner(fill, 11)
+    addStroke(fill, Color3.fromRGB(255, 255, 255), 1, 0.65)
 
+    local fillTween
     local function repaint(color)
         color = color or themeColor()
-        buttonStroke.Color = color
-        buttonStroke.Transparency = enabled and 0.58 or 0.8
-        buttonGradient.Color = liquidColors(color, 0.84)
-        indicatorStroke.Color = color
-        indicatorStroke.Transparency = enabled and 0.18 or 0.62
-        indicator.BackgroundColor3 = color
-        indicator.BackgroundTransparency = enabled and 0.12 or 0.72
-        fill.Position = enabled and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
+        button.BackgroundColor3 = GlassPalette.Surface:Lerp(color, enabled and 0.075 or 0.025)
+        buttonStroke.Color = enabled and color:Lerp(GlassPalette.Hairline, 0.56)
+            or GlassPalette.Hairline
+        buttonStroke.Transparency = enabled and 0.74 or 0.89
+        buttonGradient.Color = liquidColors(color, 0.92)
+        indicatorStroke.Color = GlassPalette.Hairline
+        indicator.BackgroundColor3 = enabled and color or GlassPalette.Raised
+        indicator.BackgroundTransparency = enabled and 0.04 or 0.16
+        if fillTween then fillTween:Cancel() end
+        fillTween = TweenService:Create(
+            fill,
+            TweenInfo.new(0.22, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+            {Position = enabled and UDim2.new(1, -20, 0.5, -9)
+                or UDim2.new(0, 2, 0.5, -9)}
+        )
+        fillTween:Play()
     end
     registerRefresh(repaint)
 
@@ -1394,45 +1482,45 @@ local function addSlider(text, minimum, maximum, initialValue, decimals, changed
     local row = create("Frame", Content, {
         Size = UDim2.new(1, 0, 0, 58),
         BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-        BackgroundTransparency = 0.4,
+        BackgroundTransparency = 0.46,
         BorderSizePixel = 0,
     })
     addCorner(row, 12)
-    local rowStroke = addStroke(row, themeColor(), 1, 0.82)
+    local rowStroke = addStroke(row, GlassPalette.Hairline, 1, 0.9)
     local rowGradient = addLiquidGradient(row, 8)
-    addLiquidHover(row, 0.4, 0.3)
+    addLiquidHover(row, 0.46, 0.37)
     local label = create("TextLabel", row, {
         Size = UDim2.new(1, -20, 0, 25),
         Position = UDim2.new(0, 10, 0, 5),
         BackgroundTransparency = 1,
-        TextColor3 = Color3.fromRGB(224, 229, 241),
+        TextColor3 = GlassPalette.Text,
         TextSize = 11,
-        Font = Enum.Font.GothamBold,
+        Font = Enum.Font.GothamMedium,
         TextXAlignment = Enum.TextXAlignment.Left,
     })
     local track = create("TextButton", row, {
-        Size = UDim2.new(1, -20, 0, 8),
-        Position = UDim2.new(0, 10, 0, 38),
-        BackgroundColor3 = Color3.fromRGB(8, 11, 18),
-        BackgroundTransparency = 0.2,
+        Size = UDim2.new(1, -20, 0, 5),
+        Position = UDim2.new(0, 10, 0, 40),
+        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+        BackgroundTransparency = 0.86,
         BorderSizePixel = 0,
         Text = "",
         AutoButtonColor = false,
     })
-    addCorner(track, 5)
+    addCorner(track, 4)
     local fill = create("Frame", track, {
         BackgroundColor3 = themeColor(),
         BorderSizePixel = 0,
     })
-    addCorner(fill, 5)
+    addCorner(fill, 4)
     local knob = create("Frame", track, {
-        Size = UDim2.new(0, 14, 0, 14),
+        Size = UDim2.new(0, 16, 0, 16),
         AnchorPoint = Vector2.new(0.5, 0.5),
         BackgroundColor3 = Color3.fromRGB(248, 249, 255),
         BorderSizePixel = 0,
     })
-    addCorner(knob, 8)
-    local knobStroke = addStroke(knob, themeColor(), 1.5, 0.12)
+    addCorner(knob, 9)
+    local knobStroke = addStroke(knob, GlassPalette.Hairline, 1, 0.48)
 
     local function formattedValue()
         if decimals == 0 then
@@ -1444,13 +1532,13 @@ local function addSlider(text, minimum, maximum, initialValue, decimals, changed
     local function redraw(color)
         color = color or themeColor()
         local fraction = math.clamp((value - minimum) / (maximum - minimum), 0, 1)
-        label.Text = "  " .. text .. formattedValue()
+        label.Text = text .. formattedValue()
         fill.Size = UDim2.new(fraction, 0, 1, 0)
         knob.Position = UDim2.new(fraction, 7 - fraction * 14, 0.5, 0)
         fill.BackgroundColor3 = color
         knobStroke.Color = color
-        rowStroke.Color = color
-        rowGradient.Color = liquidColors(color, 0.9)
+        rowStroke.Color = color:Lerp(GlassPalette.Hairline, 0.82)
+        rowGradient.Color = liquidColors(color, 0.94)
     end
 
     local function setFromX(mouseX)
@@ -1509,43 +1597,43 @@ end
 local function addTextInput(labelText, initialValue, changed, settingKey, placeholderText)
     local row = create("Frame", Content, {
         Size = UDim2.new(1, 0, 0, 66),
-        BackgroundColor3 = Color3.fromRGB(24, 28, 39),
-        BackgroundTransparency = 0.38,
+        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+        BackgroundTransparency = 0.46,
         BorderSizePixel = 0,
     })
     addCorner(row, 12)
-    local rowStroke = addStroke(row, themeColor(), 1, 0.78)
+    local rowStroke = addStroke(row, GlassPalette.Hairline, 1, 0.9)
     local rowGradient = addLiquidGradient(row, 8)
-    addLiquidHover(row, 0.38, 0.26)
+    addLiquidHover(row, 0.46, 0.37)
 
     create("TextLabel", row, {
         Size = UDim2.new(1, -20, 0, 23),
         Position = UDim2.new(0, 10, 0, 3),
         BackgroundTransparency = 1,
-        Text = "  " .. labelText,
-        TextColor3 = Color3.fromRGB(224, 229, 241),
+        Text = labelText,
+        TextColor3 = GlassPalette.Text,
         TextSize = 11,
-        Font = Enum.Font.GothamBold,
+        Font = Enum.Font.GothamMedium,
         TextXAlignment = Enum.TextXAlignment.Left,
     })
 
     local box = create("TextBox", row, {
         Size = UDim2.new(1, -20, 0, 30),
         Position = UDim2.new(0, 10, 0, 29),
-        BackgroundColor3 = Color3.fromRGB(8, 11, 18),
-        BackgroundTransparency = 0.22,
+        BackgroundColor3 = GlassPalette.Base,
+        BackgroundTransparency = 0.18,
         BorderSizePixel = 0,
         Text = tostring(initialValue or ""),
         PlaceholderText = placeholderText or "Enter value",
-        PlaceholderColor3 = Color3.fromRGB(118, 124, 141),
-        TextColor3 = Color3.fromRGB(238, 241, 249),
+        PlaceholderColor3 = GlassPalette.TertiaryText,
+        TextColor3 = GlassPalette.Text,
         TextSize = 11,
         Font = Enum.Font.GothamMedium,
         ClearTextOnFocus = false,
         TextXAlignment = Enum.TextXAlignment.Left,
     })
     addCorner(box, 9)
-    local boxStroke = addStroke(box, themeColor(), 1, 0.68)
+    local boxStroke = addStroke(box, GlassPalette.Hairline, 1, 0.86)
 
     local function clean(value)
         value = tostring(value or ""):gsub("[%c\r\n]", " ")
@@ -1565,9 +1653,9 @@ local function addTextInput(labelText, initialValue, changed, settingKey, placeh
     end)
     registerRefresh(function(color)
         color = color or themeColor()
-        rowStroke.Color = color
-        boxStroke.Color = color
-        rowGradient.Color = liquidColors(color, 0.88)
+        rowStroke.Color = color:Lerp(GlassPalette.Hairline, 0.82)
+        boxStroke.Color = color:Lerp(GlassPalette.Hairline, 0.72)
+        rowGradient.Color = liquidColors(color, 0.94)
     end)
     if settingKey then ConfigControls[settingKey] = setValue end
     return row, setValue
@@ -1577,21 +1665,21 @@ local function addColorPicker()
     local pickerCard = create("Frame", Content, {
         Size = UDim2.new(1, 0, 0, 190),
         BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-        BackgroundTransparency = 0.4,
+        BackgroundTransparency = 0.46,
         BorderSizePixel = 0,
     })
     addCorner(pickerCard, 12)
-    local cardStroke = addStroke(pickerCard, themeColor(), 1, 0.7)
+    local cardStroke = addStroke(pickerCard, GlassPalette.Hairline, 1, 0.88)
     local cardGradient = addLiquidGradient(pickerCard, 8)
 
     local title = create("TextLabel", pickerCard, {
         Size = UDim2.new(1, -20, 0, 24),
         Position = UDim2.new(0, 10, 0, 5),
         BackgroundTransparency = 1,
-        Text = "  ACCENT COLOR",
-        TextColor3 = Color3.fromRGB(230, 235, 246),
-        TextSize = 10,
-        Font = Enum.Font.GothamBold,
+        Text = "Accent color",
+        TextColor3 = GlassPalette.Text,
+        TextSize = 12,
+        Font = Enum.Font.GothamMedium,
         TextXAlignment = Enum.TextXAlignment.Left,
     })
 
@@ -1654,7 +1742,7 @@ local function addColorPicker()
         Size = UDim2.new(0, 64, 0, 24),
         Position = UDim2.new(0, 184, 0, 100),
         BackgroundTransparency = 1,
-        TextColor3 = Color3.fromRGB(225, 230, 242),
+        TextColor3 = GlassPalette.Text,
         TextSize = 10,
         Font = Enum.Font.Code,
         TextXAlignment = Enum.TextXAlignment.Center,
@@ -1663,10 +1751,10 @@ local function addColorPicker()
         Size = UDim2.new(0, 64, 0, 40),
         Position = UDim2.new(0, 184, 0, 128),
         BackgroundTransparency = 1,
-        Text = "DRAG\nTO PICK",
-        TextColor3 = Color3.fromRGB(145, 153, 172),
-        TextSize = 8,
-        Font = Enum.Font.GothamBold,
+        Text = "Drag\nto pick",
+        TextColor3 = GlassPalette.TertiaryText,
+        TextSize = 9,
+        Font = Enum.Font.GothamMedium,
         TextWrapped = true,
     })
 
@@ -1794,8 +1882,8 @@ local function addColorPicker()
     ConfigControls.Blue = setFromSettings
     registerRefresh(function(color)
         color = color or themeColor()
-        cardStroke.Color = color
-        cardGradient.Color = liquidColors(color, 0.9)
+        cardStroke.Color = color:Lerp(GlassPalette.Hairline, 0.76)
+        cardGradient.Color = liquidColors(color, 0.94)
         previewStroke.Color = color:Lerp(Color3.fromRGB(255, 255, 255), 0.45)
     end)
     redrawPicker()
@@ -1821,20 +1909,24 @@ end
 
 local keyButton = create("TextButton", Content, {
     Size = UDim2.new(1, 0, 0, 42),
-    BackgroundColor3 = Color3.fromRGB(24, 28, 39),
-    BackgroundTransparency = 0.38,
+    BackgroundColor3 = GlassPalette.Surface,
+    BackgroundTransparency = 0.34,
     BorderSizePixel = 0,
     Text = "   Toggle Menu: [" .. bindingDisplay(Settings.MenuKey) .. "]",
-    TextColor3 = Color3.fromRGB(232, 236, 246),
+    TextColor3 = GlassPalette.Text,
     TextSize = 11,
-    Font = Enum.Font.GothamBold,
+    Font = Enum.Font.GothamMedium,
     TextXAlignment = Enum.TextXAlignment.Left,
     AutoButtonColor = false,
 })
 addCorner(keyButton, 12)
-local KeyButtonStroke = addStroke(keyButton, themeColor(), 1, 0.78)
-addLiquidHover(keyButton, 0.38, 0.24)
-registerRefresh(function(color) KeyButtonStroke.Color = color or themeColor() end)
+do
+    local stroke = addStroke(keyButton, GlassPalette.Hairline, 1, 0.88)
+    registerRefresh(function(color)
+        stroke.Color = (color or themeColor()):Lerp(GlassPalette.Hairline, 0.76)
+    end)
+end
+addLiquidHover(keyButton, 0.34, 0.23)
 keyButton.MouseButton1Click:Connect(function()
     waitingForBindingSetting = "MenuKey"
     keyButton.Text = "   Press any key or mouse button..."
@@ -1850,41 +1942,41 @@ local function addBindControl(label, bindingSetting, modeSetting)
     })
     local bindButton = create("TextButton", row, {
         Size = UDim2.new(0.68, -3, 1, 0),
-        BackgroundColor3 = Color3.fromRGB(24, 28, 39),
-        BackgroundTransparency = 0.38,
+        BackgroundColor3 = GlassPalette.Surface,
+        BackgroundTransparency = 0.34,
         BorderSizePixel = 0,
         Text = "   " .. label .. ": [" .. bindingDisplay(Settings[bindingSetting]) .. "]",
-        TextColor3 = Color3.fromRGB(232, 236, 246),
+        TextColor3 = GlassPalette.Text,
         TextSize = 11,
-        Font = Enum.Font.GothamBold,
+        Font = Enum.Font.GothamMedium,
         TextXAlignment = Enum.TextXAlignment.Left,
         AutoButtonColor = false,
     })
     local modeButton = create("TextButton", row, {
         Size = UDim2.new(0.32, -3, 1, 0),
         Position = UDim2.new(0.68, 3, 0, 0),
-        BackgroundColor3 = Color3.fromRGB(24, 28, 39),
-        BackgroundTransparency = 0.38,
+        BackgroundColor3 = GlassPalette.Raised,
+        BackgroundTransparency = 0.26,
         BorderSizePixel = 0,
         Text = string.upper(Settings[modeSetting]),
         TextColor3 = themeColor(),
         TextSize = 10,
-        Font = Enum.Font.GothamBold,
+        Font = Enum.Font.GothamMedium,
         AutoButtonColor = false,
     })
     addCorner(bindButton, 12)
     addCorner(modeButton, 12)
-    local bindStroke = addStroke(bindButton, themeColor(), 1, 0.78)
-    local modeStroke = addStroke(modeButton, themeColor(), 1, 0.62)
+    local bindStroke = addStroke(bindButton, GlassPalette.Hairline, 1, 0.88)
+    local modeStroke = addStroke(modeButton, GlassPalette.Hairline, 1, 0.82)
     addLiquidGradient(bindButton, 8)
     addLiquidGradient(modeButton, 8)
-    addLiquidHover(bindButton, 0.38, 0.24)
-    addLiquidHover(modeButton, 0.38, 0.24)
+    addLiquidHover(bindButton, 0.34, 0.23)
+    addLiquidHover(modeButton, 0.26, 0.16)
     registerRefresh(function(color)
         color = color or themeColor()
-        bindStroke.Color = color
-        modeStroke.Color = color
-        modeButton.TextColor3 = color:Lerp(Color3.fromRGB(255, 255, 255), 0.78)
+        bindStroke.Color = color:Lerp(GlassPalette.Hairline, 0.78)
+        modeStroke.Color = color:Lerp(GlassPalette.Hairline, 0.60)
+        modeButton.TextColor3 = color:Lerp(GlassPalette.Text, 0.68)
     end)
 
     local function setMode(value)
@@ -1947,20 +2039,20 @@ end
 local function addAction(text, callback)
     local button = create("TextButton", Content, {
         Size = UDim2.new(1, 0, 0, 42),
-        BackgroundColor3 = Color3.fromRGB(24, 28, 39),
-        BackgroundTransparency = 0.34,
+        BackgroundColor3 = GlassPalette.Raised,
+        BackgroundTransparency = 0.26,
         BorderSizePixel = 0,
         Text = text,
-        TextColor3 = Color3.fromRGB(236, 240, 249),
+        TextColor3 = GlassPalette.Text,
         TextSize = 11,
-        Font = Enum.Font.GothamBold,
+        Font = Enum.Font.GothamMedium,
         AutoButtonColor = false,
     })
     addCorner(button, 12)
-    local stroke = addStroke(button, themeColor(), 1, 0.62)
-    addLiquidHover(button, 0.34, 0.18)
+    local stroke = addStroke(button, GlassPalette.Hairline, 1, 0.84)
+    addLiquidHover(button, 0.26, 0.14)
     registerRefresh(function(color)
-        stroke.Color = color or themeColor()
+        stroke.Color = (color or themeColor()):Lerp(GlassPalette.Hairline, 0.62)
     end)
     button.MouseButton1Click:Connect(callback)
     return button
@@ -2122,22 +2214,24 @@ Content = MenuUI.Pages.configs
 addSection("--- CONFIGS ---")
 local ConfigNameBox = create("TextBox", Content, {
     Size = UDim2.new(1, 0, 0, 42),
-    BackgroundColor3 = Color3.fromRGB(24, 28, 39),
-    BackgroundTransparency = 0.34,
+    BackgroundColor3 = GlassPalette.Surface,
+    BackgroundTransparency = 0.30,
     BorderSizePixel = 0,
     Text = ConfigState.ActiveConfig,
     PlaceholderText = "Config name",
     ClearTextOnFocus = false,
-    TextColor3 = Color3.fromRGB(235, 235, 235),
-    PlaceholderColor3 = Color3.fromRGB(135, 135, 135),
+    TextColor3 = GlassPalette.Text,
+    PlaceholderColor3 = GlassPalette.TertiaryText,
     TextSize = 11,
-    Font = Enum.Font.GothamBold,
+    Font = Enum.Font.GothamMedium,
 })
 addCorner(ConfigNameBox, 12)
-local ConfigNameStroke = addStroke(ConfigNameBox, themeColor(), 1, 0.62)
-registerRefresh(function(color)
-    ConfigNameStroke.Color = color or themeColor()
-end)
+do
+    local stroke = addStroke(ConfigNameBox, GlassPalette.Hairline, 1, 0.84)
+    registerRefresh(function(color)
+        stroke.Color = (color or themeColor()):Lerp(GlassPalette.Hairline, 0.62)
+    end)
+end
 
 local function selectedConfigName()
     local name = sanitizeConfigName(ConfigNameBox.Text)
@@ -2252,7 +2346,7 @@ ConfigStatusLabel = create("TextLabel", Content, {
         and Color3.fromRGB(180, 235, 180)
         or Color3.fromRGB(255, 115, 115),
     TextSize = 11,
-    Font = Enum.Font.GothamBold,
+    Font = Enum.Font.GothamMedium,
     TextWrapped = true,
     TextXAlignment = Enum.TextXAlignment.Left,
 })
@@ -3982,7 +4076,8 @@ end
 local updateFeatureHUD
 do
     -- Keep the status panel visible even when the settings menu is closed.
-    local hud = create("Frame", ScreenGui, {
+    local state = {}
+    state.Hud = create("Frame", ScreenGui, {
         Name = "FeatureHUD",
         Position = UDim2.new(0, 82, 0, 18),
         Size = UDim2.new(0, 190, 0, 90),
@@ -3991,10 +4086,10 @@ do
         BorderSizePixel = 0,
         ZIndex = 8,
     })
-    addCorner(hud, 14)
-    local stroke = addStroke(hud, themeColor(), 1, 0.4)
-    local gradient = addLiquidGradient(hud, 25)
-    local title = create("TextLabel", hud, {
+    addCorner(state.Hud, 14)
+    state.Stroke = addStroke(state.Hud, themeColor(), 1, 0.4)
+    state.Gradient = addLiquidGradient(state.Hud, 25)
+    state.Title = create("TextLabel", state.Hud, {
         Name = "Title",
         Position = UDim2.new(0, 14, 0, 8),
         Size = UDim2.new(1, -28, 0, 20),
@@ -4005,47 +4100,52 @@ do
         TextXAlignment = Enum.TextXAlignment.Left,
         ZIndex = 9,
     })
-
-    local function statusRow(name, y)
-        return create("TextLabel", hud, {
-            Name = name .. "Status",
-            Position = UDim2.new(0, 14, 0, y),
-            Size = UDim2.new(1, -28, 0, 24),
-            BackgroundTransparency = 1,
-            Text = "",
-            TextSize = 12,
-            Font = Enum.Font.GothamBold,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            ZIndex = 9,
-        })
-    end
-    local aimLabel = statusRow("Aimbot", 30)
-    local triggerLabel = statusRow("Triggerbot", 54)
-    local onColor = Color3.fromRGB(127, 235, 170)
-    local offColor = Color3.fromRGB(232, 154, 154)
-    local previousAim, previousTrigger
+    state.AimLabel = create("TextLabel", state.Hud, {
+        Name = "AimbotStatus",
+        Position = UDim2.new(0, 14, 0, 30),
+        Size = UDim2.new(1, -28, 0, 24),
+        BackgroundTransparency = 1,
+        Text = "",
+        TextSize = 12,
+        Font = Enum.Font.GothamBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 9,
+    })
+    state.TriggerLabel = create("TextLabel", state.Hud, {
+        Name = "TriggerbotStatus",
+        Position = UDim2.new(0, 14, 0, 54),
+        Size = UDim2.new(1, -28, 0, 24),
+        BackgroundTransparency = 1,
+        Text = "",
+        TextSize = 12,
+        Font = Enum.Font.GothamBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 9,
+    })
+    state.OnColor = Color3.fromRGB(127, 235, 170)
+    state.OffColor = Color3.fromRGB(232, 154, 154)
 
     updateFeatureHUD = function()
         -- Use the same activation checks as the features, including held binds.
         local aimActive = aimbotBindActive()
         local triggerActive = triggerbotBindActive()
-        if aimActive ~= previousAim then
-            aimLabel.Text = "Aimbot: " .. (aimActive and "ON" or "OFF")
-            aimLabel.TextColor3 = aimActive and onColor or offColor
-            previousAim = aimActive
+        if aimActive ~= state.PreviousAim then
+            state.AimLabel.Text = "Aimbot: " .. (aimActive and "ON" or "OFF")
+            state.AimLabel.TextColor3 = aimActive and state.OnColor or state.OffColor
+            state.PreviousAim = aimActive
         end
-        if triggerActive ~= previousTrigger then
-            triggerLabel.Text = "Triggerbot: " .. (triggerActive and "ON" or "OFF")
-            triggerLabel.TextColor3 = triggerActive and onColor or offColor
-            previousTrigger = triggerActive
+        if triggerActive ~= state.PreviousTrigger then
+            state.TriggerLabel.Text = "Triggerbot: " .. (triggerActive and "ON" or "OFF")
+            state.TriggerLabel.TextColor3 = triggerActive and state.OnColor or state.OffColor
+            state.PreviousTrigger = triggerActive
         end
     end
     registerRefresh(function(color)
         color = color or themeColor()
-        title.TextColor3 = color
-        stroke.Color = color
-        gradient.Color = liquidColors(color, 0.76)
-        hud.BackgroundTransparency = glassTransparency()
+        state.Title.TextColor3 = color
+        state.Stroke.Color = color
+        state.Gradient.Color = liquidColors(color, 0.76)
+        state.Hud.BackgroundTransparency = glassTransparency()
         updateFeatureHUD()
     end)
 end
@@ -4746,72 +4846,73 @@ do
     )
 end
 
-local FakeLagRoot
-local fakeLagSleeping = false
-local nextFakeLagSwitch = 0
-local fakeLagWarningShown = false
+local FakeLag = {
+    Sleeping = false,
+    NextSwitch = 0,
+    WarningShown = false,
+}
 
-local function warnFakeLag(message)
-    if fakeLagWarningShown then return end
-    fakeLagWarningShown = true
+function FakeLag.Warn(message)
+    if FakeLag.WarningShown then return end
+    FakeLag.WarningShown = true
     warn("[uorkee hub] Fake Lag: " .. message)
 end
 
-local function restoreFakeLag()
-    local root = FakeLagRoot or RuntimeEnvironment.uorkeeFakeLagRoot
+function FakeLag.Restore()
+    local root = FakeLag.Root or RuntimeEnvironment.uorkeeFakeLagRoot
     local setter = SetHiddenProperty or RuntimeEnvironment.uorkeeFakeLagSetter
     if root and type(setter) == "function" then
         pcall(setter, root, "NetworkIsSleeping", false)
     end
-    FakeLagRoot = nil
-    fakeLagSleeping = false
-    nextFakeLagSwitch = 0
+    FakeLag.Root = nil
+    FakeLag.Sleeping = false
+    FakeLag.NextSwitch = 0
     RuntimeEnvironment.uorkeeFakeLagRoot = nil
     RuntimeEnvironment.uorkeeFakeLagSetter = nil
 end
 
 RunService:BindToRenderStep("uorkeeFakeLag", Enum.RenderPriority.Last.Value + 1, function()
     if not Settings.FakeLagEnabled then
-        if FakeLagRoot or fakeLagSleeping then
-            restoreFakeLag()
+        if FakeLag.Root or FakeLag.Sleeping then
+            FakeLag.Restore()
         end
         return
     end
 
     if type(SetHiddenProperty) ~= "function" then
-        warnFakeLag("sethiddenproperty is not available in this executor build")
+        FakeLag.Warn("sethiddenproperty is not available in this executor build")
         return
     end
 
     local _, root = characterInfo(LocalPlayer)
     if not root then
-        restoreFakeLag()
+        FakeLag.Restore()
         return
     end
 
-    if FakeLagRoot ~= root then
-        restoreFakeLag()
-        FakeLagRoot = root
+    if FakeLag.Root ~= root then
+        FakeLag.Restore()
+        FakeLag.Root = root
         RuntimeEnvironment.uorkeeFakeLagRoot = root
         RuntimeEnvironment.uorkeeFakeLagSetter = SetHiddenProperty
     end
 
     local now = os.clock()
-    if now < nextFakeLagSwitch then return end
+    if now < FakeLag.NextSwitch then return end
 
-    local sleeping = not fakeLagSleeping
+    local sleeping = not FakeLag.Sleeping
     local success = pcall(SetHiddenProperty, root, "NetworkIsSleeping", sleeping)
     if not success then
-        warnFakeLag("this executor cannot change NetworkIsSleeping")
-        restoreFakeLag()
+        FakeLag.Warn("this executor cannot change NetworkIsSleeping")
+        FakeLag.Restore()
         return
     end
 
-    fakeLagSleeping = sleeping
-    nextFakeLagSwitch = now + (sleeping and Settings.FakeLagHold or Settings.FakeLagRelease)
+    FakeLag.Sleeping = sleeping
+    FakeLag.NextSwitch = now + (sleeping and Settings.FakeLagHold or Settings.FakeLagRelease)
 end)
 
-local function terminate()
+MenuUI.terminate = function()
     MenuUI.Alive = false
     for _, tween in ipairs(MenuUI.Tweens) do tween:Cancel() end
     if MenuUI.PageTween then MenuUI.PageTween:Cancel() end
@@ -4834,7 +4935,7 @@ local function terminate()
     pcall(function() RunService:UnbindFromRenderStep("uorkeeAntiZoom") end)
     pcall(function() RunService:UnbindFromRenderStep("uorkeeCustomScope") end)
     pcall(function() RunService:UnbindFromRenderStep("uorkeeFakeLag") end)
-    restoreFakeLag()
+    FakeLag.Restore()
     if MainInputConnection then
         pcall(function() MainInputConnection:Disconnect() end)
         MainInputConnection = nil
@@ -4884,13 +4985,15 @@ local function terminate()
     ScreenGui:Destroy()
 end
 
-addAction("Terminate uorkee hub", terminate)
+addAction("Terminate uorkee hub", MenuUI.terminate)
 
 MenuButton.MouseButton1Click:Connect(function()
     MenuUI.setOpen(not MenuUI.Open)
 end)
 
-local function bindingFromInput(input)
+local InputHelpers = {}
+
+function InputHelpers.FromInput(input)
     if input.KeyCode and input.KeyCode ~= Enum.KeyCode.Unknown then
         return input.KeyCode
     end
@@ -4902,12 +5005,12 @@ local function bindingFromInput(input)
     end
 end
 
-local function inputMatchesBinding(input, binding)
+function InputHelpers.Matches(input, binding)
     return binding ~= nil
         and (input.KeyCode == binding or input.UserInputType == binding)
 end
 
-local function toggleFeatureSetting(settingKey)
+function InputHelpers.ToggleSetting(settingKey)
     local value = not Settings[settingKey]
     local setter = ConfigControls[settingKey]
     if setter then
@@ -4924,7 +5027,7 @@ MainInputConnection = UserInputService.InputBegan:Connect(function(input, gamePr
     -- Binding capture must run before the Roblox/UI processed-input guard.
     -- Mouse clicks made while the menu is open are otherwise discarded.
     if waitingForBindingSetting then
-        local binding = bindingFromInput(input)
+        local binding = InputHelpers.FromInput(input)
         if binding then
             Settings[waitingForBindingSetting] = binding
             waitingForBindingSetting = nil
@@ -4940,7 +5043,7 @@ MainInputConnection = UserInputService.InputBegan:Connect(function(input, gamePr
     end
     if gameProcessed then return end
 
-    if inputMatchesBinding(input, Settings.TeleportKey) then
+    if InputHelpers.Matches(input, Settings.TeleportKey) then
         if Settings.TeleportBindMode == "Hold" then
             TeleportBindHeld = true
         else
@@ -4950,56 +5053,56 @@ MainInputConnection = UserInputService.InputBegan:Connect(function(input, gamePr
         teleportToNearestPlayer()
     end
 
-    if inputMatchesBinding(input, Settings.AimbotKey) then
+    if InputHelpers.Matches(input, Settings.AimbotKey) then
         if Settings.AimbotBindMode == "Hold" then
             AimbotBindHeld = true
         else
-            toggleFeatureSetting("AimbotEnabled")
+            InputHelpers.ToggleSetting("AimbotEnabled")
         end
     end
 
-    if inputMatchesBinding(input, Settings.TriggerbotKey) then
+    if InputHelpers.Matches(input, Settings.TriggerbotKey) then
         if Settings.TriggerbotBindMode == "Hold" then
             TriggerbotBindHeld = true
         else
-            toggleFeatureSetting("TriggerbotEnabled")
+            InputHelpers.ToggleSetting("TriggerbotEnabled")
         end
     end
 
-    if inputMatchesBinding(input, Settings.NoclipKey) then
+    if InputHelpers.Matches(input, Settings.NoclipKey) then
         local state = RuntimeEnvironment.uorkeeMovementState
         if state then
             if Settings.NoclipBindMode == "Hold" then
                 state.NoclipHeld = true
             else
-                toggleFeatureSetting("NoclipEnabled")
+                InputHelpers.ToggleSetting("NoclipEnabled")
             end
         end
     end
 
-    if inputMatchesBinding(input, Settings.SpeedKey) then
+    if InputHelpers.Matches(input, Settings.SpeedKey) then
         local state = RuntimeEnvironment.uorkeeMovementState
         if state then
             if Settings.SpeedBindMode == "Hold" then
                 state.SpeedHeld = true
             else
-                toggleFeatureSetting("SpeedEnabled")
+                InputHelpers.ToggleSetting("SpeedEnabled")
             end
         end
     end
 
-    if inputMatchesBinding(input, Settings.ThirdPersonKey) then
+    if InputHelpers.Matches(input, Settings.ThirdPersonKey) then
         local state = RuntimeEnvironment.uorkeeThirdPersonState
         if state then
             if Settings.ThirdPersonBindMode == "Hold" then
                 state.Held = true
             else
-                toggleFeatureSetting("ForceThirdPersonEnabled")
+                InputHelpers.ToggleSetting("ForceThirdPersonEnabled")
             end
         end
     end
 
-    if inputMatchesBinding(input, Settings.MenuKey) then
+    if InputHelpers.Matches(input, Settings.MenuKey) then
         MenuUI.setOpen(not MenuUI.Open)
     end
 end)
@@ -5009,24 +5112,24 @@ MainInputEndedConnection = UserInputService.InputEnded:Connect(function(input)
         HitSoundAttackHeld = false
     end
     if stopped then return end
-    if inputMatchesBinding(input, Settings.TeleportKey) then
+    if InputHelpers.Matches(input, Settings.TeleportKey) then
         TeleportBindHeld = false
     end
-    if inputMatchesBinding(input, Settings.AimbotKey) then
+    if InputHelpers.Matches(input, Settings.AimbotKey) then
         AimbotBindHeld = false
     end
-    if inputMatchesBinding(input, Settings.TriggerbotKey) then
+    if InputHelpers.Matches(input, Settings.TriggerbotKey) then
         TriggerbotBindHeld = false
     end
-    if inputMatchesBinding(input, Settings.NoclipKey) then
+    if InputHelpers.Matches(input, Settings.NoclipKey) then
         local state = RuntimeEnvironment.uorkeeMovementState
         if state then state.NoclipHeld = false end
     end
-    if inputMatchesBinding(input, Settings.SpeedKey) then
+    if InputHelpers.Matches(input, Settings.SpeedKey) then
         local state = RuntimeEnvironment.uorkeeMovementState
         if state then state.SpeedHeld = false end
     end
-    if inputMatchesBinding(input, Settings.ThirdPersonKey) then
+    if InputHelpers.Matches(input, Settings.ThirdPersonKey) then
         local state = RuntimeEnvironment.uorkeeThirdPersonState
         if state then state.Held = false end
     end
