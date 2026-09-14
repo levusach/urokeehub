@@ -64,6 +64,15 @@ do
     RuntimeEnvironment.uorkeeMovementState = nil
 end
 
+do
+    local previousThirdPersonCleanup = RuntimeEnvironment.uorkeeThirdPersonCleanup
+    if type(previousThirdPersonCleanup) == "function" then
+        pcall(previousThirdPersonCleanup)
+    end
+    RuntimeEnvironment.uorkeeThirdPersonCleanup = nil
+    RuntimeEnvironment.uorkeeThirdPersonState = nil
+end
+
 local function findRuntimeFunction(...)
     for index = 1, select("#", ...) do
         local name = select(index, ...)
@@ -155,12 +164,18 @@ local previousCameraSettings = RuntimeEnvironment.uorkeeOriginalCameraSettings
     or RuntimeEnvironment.KesiciOriginalCameraSettings
 if type(previousCameraSettings) == "table" then
     pcall(function()
+        local restoredCamera = workspace.CurrentCamera or Camera
         LocalPlayer.CameraMinZoomDistance = 0.5
         LocalPlayer.CameraMaxZoomDistance = previousCameraSettings.MaxZoom
         LocalPlayer.CameraMinZoomDistance = previousCameraSettings.MinZoom
         LocalPlayer.CameraMode = previousCameraSettings.CameraMode
-        Camera.CameraType = previousCameraSettings.CameraType
-        Camera.CameraSubject = previousCameraSettings.CameraSubject
+        if previousCameraSettings.OcclusionMode then
+            LocalPlayer.DevCameraOcclusionMode = previousCameraSettings.OcclusionMode
+        end
+        if restoredCamera then
+            restoredCamera.CameraType = previousCameraSettings.CameraType
+            restoredCamera.CameraSubject = previousCameraSettings.CameraSubject
+        end
         UserInputService.MouseBehavior = previousCameraSettings.MouseBehavior
         UserInputService.MouseIconEnabled = previousCameraSettings.MouseIconEnabled
     end)
@@ -223,6 +238,8 @@ local Settings = {
     SpeedEnabled = false,
     SpeedValue = 32,
     InfiniteJumpEnabled = true,
+    ForceThirdPersonEnabled = false,
+    ThirdPersonDistance = 8,
     FakeLagEnabled = true,
     FakeLagHold = 0.25,
     FakeLagRelease = 0.04,
@@ -247,6 +264,8 @@ local Settings = {
     NoclipBindMode = "Toggle",
     SpeedKey = Enum.KeyCode.V,
     SpeedBindMode = "Toggle",
+    ThirdPersonKey = Enum.KeyCode.H,
+    ThirdPersonBindMode = "Toggle",
     TeleportOffset = 3,
     TeleportWhitelist = {"fffdtrrrr","rivalsmaster_new"
     },
@@ -294,12 +313,14 @@ local ConfigKeys = {
     "VictoryMusicId5", "VictoryMusicStartOffset5",
     "AmbientModeEnabled", "AmbientTintStrength", "AmbientParticleRate",
     "NoclipEnabled", "SpeedEnabled", "SpeedValue", "InfiniteJumpEnabled",
+    "ForceThirdPersonEnabled", "ThirdPersonDistance",
     "FakeLagEnabled", "FakeLagHold", "FakeLagRelease",
     "WallCheck", "ShowFOV", "RainbowFOV", "FOVRadius", "AimSpeed",
     "MenuOpacity", "Red", "Green", "Blue",
     "MenuKey", "TeleportKey", "TeleportBindMode",
     "AimbotKey", "AimbotBindMode", "TriggerbotKey", "TriggerbotBindMode",
     "NoclipKey", "NoclipBindMode", "SpeedKey", "SpeedBindMode",
+    "ThirdPersonKey", "ThirdPersonBindMode",
     "TeleportOffset", "TeleportWhitelist",
 }
 
@@ -345,6 +366,8 @@ RuntimeEnvironment.uorkeeConfigSections = {
         SpeedEnabled = true,
         SpeedValue = true,
         InfiniteJumpEnabled = true,
+        ForceThirdPersonEnabled = true,
+        ThirdPersonDistance = true,
         FakeLagEnabled = true,
         FakeLagHold = true,
         FakeLagRelease = true,
@@ -363,6 +386,8 @@ RuntimeEnvironment.uorkeeConfigSections = {
         NoclipBindMode = true,
         SpeedKey = true,
         SpeedBindMode = true,
+        ThirdPersonKey = true,
+        ThirdPersonBindMode = true,
     },
     Appearance = {
         MenuOpacity = true,
@@ -394,6 +419,7 @@ local BindingSettingKeys = {
     TriggerbotKey = true,
     NoclipKey = true,
     SpeedKey = true,
+    ThirdPersonKey = true,
 }
 
 local BindModeSettingKeys = {
@@ -402,6 +428,7 @@ local BindModeSettingKeys = {
     TriggerbotBindMode = true,
     NoclipBindMode = true,
     SpeedBindMode = true,
+    ThirdPersonBindMode = true,
 }
 
 local ExpectedSettingTypes = {}
@@ -1804,6 +1831,9 @@ local function addBindControl(label, bindingSetting, modeSetting)
         elseif modeSetting == "SpeedBindMode" then
             local state = RuntimeEnvironment.uorkeeMovementState
             if state then state.SpeedHeld = false end
+        elseif modeSetting == "ThirdPersonBindMode" then
+            local state = RuntimeEnvironment.uorkeeThirdPersonState
+            if state then state.Held = false end
         end
         queueAutoSave()
     end
@@ -1828,6 +1858,7 @@ addBindControl("Aimbot", "AimbotKey", "AimbotBindMode")
 addBindControl("Triggerbot", "TriggerbotKey", "TriggerbotBindMode")
 addBindControl("Noclip", "NoclipKey", "NoclipBindMode")
 addBindControl("Speed", "SpeedKey", "SpeedBindMode")
+addBindControl("Third Person", "ThirdPersonKey", "ThirdPersonBindMode")
 
 refreshKeyButtons = function()
     for settingKey, button in pairs(BindKeyButtons) do
@@ -1880,6 +1911,12 @@ end, "SpeedValue")
 addToggle("Infinite Jump", Settings.InfiniteJumpEnabled, function(value)
     Settings.InfiniteJumpEnabled = value
 end, "InfiniteJumpEnabled")
+addToggle("Force Third Person", Settings.ForceThirdPersonEnabled, function(value)
+    Settings.ForceThirdPersonEnabled = value
+end, "ForceThirdPersonEnabled")
+addSlider("Third Person Distance: ", 4, 20, Settings.ThirdPersonDistance, 1, function(value)
+    Settings.ThirdPersonDistance = value
+end, "ThirdPersonDistance")
 addToggle("Fake Lag" .. (SetHiddenProperty and "" or " [unsupported]"), Settings.FakeLagEnabled, function(value)
     Settings.FakeLagEnabled = value
 end, "FakeLagEnabled")
@@ -3771,6 +3808,170 @@ do
     end)
 end
 
+do
+    local state = {
+        Alive = true,
+        Held = false,
+        Applied = false,
+        Enforcing = false,
+        Original = nil,
+        Camera = nil,
+        Connections = {},
+    }
+    RuntimeEnvironment.uorkeeThirdPersonState = state
+
+    state.Active = function()
+        if Settings.ThirdPersonBindMode == "Hold" then
+            return state.Held
+        end
+        return Settings.ForceThirdPersonEnabled
+    end
+
+    state.Capture = function(currentCamera)
+        if state.Original then return end
+        state.Original = {
+            MinZoom = LocalPlayer.CameraMinZoomDistance,
+            MaxZoom = LocalPlayer.CameraMaxZoomDistance,
+            CameraMode = LocalPlayer.CameraMode,
+            OcclusionMode = LocalPlayer.DevCameraOcclusionMode,
+            Camera = currentCamera,
+            CameraType = currentCamera and currentCamera.CameraType,
+            CameraSubject = currentCamera and currentCamera.CameraSubject,
+            MouseBehavior = UserInputService.MouseBehavior,
+            MouseIconEnabled = UserInputService.MouseIconEnabled,
+        }
+        RuntimeEnvironment.uorkeeOriginalCameraSettings = state.Original
+    end
+
+    state.Restore = function()
+        if not state.Original then
+            state.Applied = false
+            return
+        end
+        local original = state.Original
+        local currentCamera = workspace.CurrentCamera or state.Camera or Camera
+        state.Enforcing = true
+        pcall(function()
+            LocalPlayer.CameraMinZoomDistance = 0.5
+            LocalPlayer.CameraMaxZoomDistance = math.max(
+                tonumber(original.MaxZoom) or 128,
+                tonumber(original.MinZoom) or 0.5
+            )
+            LocalPlayer.CameraMinZoomDistance = tonumber(original.MinZoom) or 0.5
+            LocalPlayer.CameraMode = original.CameraMode or Enum.CameraMode.Classic
+            if original.OcclusionMode then
+                LocalPlayer.DevCameraOcclusionMode = original.OcclusionMode
+            end
+            if currentCamera then
+                currentCamera.CameraType = original.CameraType or Enum.CameraType.Custom
+                if original.CameraSubject and original.CameraSubject.Parent then
+                    currentCamera.CameraSubject = original.CameraSubject
+                end
+            end
+        end)
+        state.Enforcing = false
+        state.Applied = false
+        state.Original = nil
+        if RuntimeEnvironment.uorkeeOriginalCameraSettings == original then
+            RuntimeEnvironment.uorkeeOriginalCameraSettings = nil
+        end
+    end
+
+    state.EnforceProperties = function()
+        if state.Enforcing or not state.Active() then return end
+        local currentCamera = workspace.CurrentCamera or Camera
+        if not currentCamera then return end
+        Camera = currentCamera
+        state.Camera = currentCamera
+        state.Capture(currentCamera)
+        local distance = math.clamp(tonumber(Settings.ThirdPersonDistance) or 8, 4, 20)
+        state.Enforcing = true
+        pcall(function()
+            LocalPlayer.CameraMinZoomDistance = 0.5
+            LocalPlayer.CameraMaxZoomDistance = distance
+            LocalPlayer.CameraMinZoomDistance = distance
+            LocalPlayer.CameraMaxZoomDistance = distance
+            LocalPlayer.CameraMode = Enum.CameraMode.Classic
+            LocalPlayer.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Invisicam
+        end)
+        state.Enforcing = false
+        state.Applied = true
+    end
+
+    for _, propertyName in ipairs({
+        "CameraMode", "CameraMinZoomDistance", "CameraMaxZoomDistance", "DevCameraOcclusionMode",
+    }) do
+        state.Connections[#state.Connections + 1] =
+            LocalPlayer:GetPropertyChangedSignal(propertyName):Connect(function()
+                if state.Alive and state.Active() and not state.Enforcing then
+                    state.EnforceProperties()
+                end
+            end)
+    end
+    state.Connections[#state.Connections + 1] =
+        workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+            local currentCamera = workspace.CurrentCamera
+            if currentCamera then
+                Camera = currentCamera
+                state.Camera = currentCamera
+                if state.Alive and state.Active() then state.EnforceProperties() end
+            end
+        end)
+
+    state.Cleanup = function()
+        if not state.Alive then return end
+        state.Alive = false
+        pcall(function() RunService:UnbindFromRenderStep("uorkeeForceThirdPerson") end)
+        for _, connection in ipairs(state.Connections) do
+            pcall(function() connection:Disconnect() end)
+        end
+        table.clear(state.Connections)
+        state.Restore()
+        if RuntimeEnvironment.uorkeeThirdPersonState == state then
+            RuntimeEnvironment.uorkeeThirdPersonState = nil
+            RuntimeEnvironment.uorkeeThirdPersonCleanup = nil
+        end
+    end
+    RuntimeEnvironment.uorkeeThirdPersonCleanup = state.Cleanup
+
+    RunService:BindToRenderStep(
+        "uorkeeForceThirdPerson",
+        Enum.RenderPriority.Last.Value + 5,
+        function()
+            if not state.Alive or stopped then return end
+            if not state.Active() then
+                if state.Applied then state.Restore() end
+                return
+            end
+
+            state.EnforceProperties()
+            local currentCamera = workspace.CurrentCamera or Camera
+            local character = LocalPlayer.Character
+            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+            local root = character and character:FindFirstChild("HumanoidRootPart")
+            local focusPart = character and (character:FindFirstChild("Head") or root)
+            if not currentCamera or not humanoid or humanoid.Health <= 0
+                or not root or not focusPart then return end
+
+            pcall(function()
+                currentCamera.CameraType = Enum.CameraType.Custom
+                currentCamera.CameraSubject = humanoid
+                local distance = math.clamp(tonumber(Settings.ThirdPersonDistance) or 8, 4, 20)
+                local currentFrame = currentCamera.CFrame
+                local focusPosition = focusPart.Position
+                    + root.CFrame:VectorToWorldSpace(humanoid.CameraOffset)
+                local cameraPosition = focusPosition - currentFrame.LookVector * distance
+                currentCamera.CFrame = CFrame.lookAt(
+                    cameraPosition,
+                    focusPosition,
+                    currentFrame.UpVector
+                )
+                currentCamera.Focus = CFrame.new(focusPosition)
+            end)
+        end
+    )
+end
+
 local FakeLagRoot
 local fakeLagSleeping = false
 local nextFakeLagSwitch = 0
@@ -3855,6 +4056,7 @@ local function terminate()
     pcall(function() RunService:UnbindFromRenderStep("uorkeeESP") end)
     pcall(function() RunService:UnbindFromRenderStep("uorkeeTriggerbot") end)
     pcall(function() RunService:UnbindFromRenderStep("uorkeeTeleportBind") end)
+    pcall(function() RunService:UnbindFromRenderStep("uorkeeForceThirdPerson") end)
     pcall(function() RunService:UnbindFromRenderStep("uorkeeFakeLag") end)
     restoreFakeLag()
     if MainInputConnection then
@@ -3886,6 +4088,9 @@ local function terminate()
     if type(ambientCleanup) == "function" then pcall(ambientCleanup) end
     if type(RuntimeEnvironment.uorkeeMovementCleanup) == "function" then
         pcall(RuntimeEnvironment.uorkeeMovementCleanup)
+    end
+    if type(RuntimeEnvironment.uorkeeThirdPersonCleanup) == "function" then
+        pcall(RuntimeEnvironment.uorkeeThirdPersonCleanup)
     end
     for player in pairs(PlayerESP) do
         removePlayerESP(player)
@@ -3997,6 +4202,17 @@ MainInputConnection = UserInputService.InputBegan:Connect(function(input, gamePr
         end
     end
 
+    if inputMatchesBinding(input, Settings.ThirdPersonKey) then
+        local state = RuntimeEnvironment.uorkeeThirdPersonState
+        if state then
+            if Settings.ThirdPersonBindMode == "Hold" then
+                state.Held = true
+            else
+                toggleFeatureSetting("ForceThirdPersonEnabled")
+            end
+        end
+    end
+
     if inputMatchesBinding(input, Settings.MenuKey) then
         MenuUI.setOpen(not MenuUI.Open)
     end
@@ -4023,6 +4239,10 @@ MainInputEndedConnection = UserInputService.InputEnded:Connect(function(input)
     if inputMatchesBinding(input, Settings.SpeedKey) then
         local state = RuntimeEnvironment.uorkeeMovementState
         if state then state.SpeedHeld = false end
+    end
+    if inputMatchesBinding(input, Settings.ThirdPersonKey) then
+        local state = RuntimeEnvironment.uorkeeThirdPersonState
+        if state then state.Held = false end
     end
 end)
 RuntimeEnvironment.uorkeeInputConnections = {MainInputConnection, MainInputEndedConnection}
