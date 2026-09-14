@@ -55,6 +55,15 @@ do
     RuntimeEnvironment.uorkeeAmbientState = nil
 end
 
+do
+    local previousMovementCleanup = RuntimeEnvironment.uorkeeMovementCleanup
+    if type(previousMovementCleanup) == "function" then
+        pcall(previousMovementCleanup)
+    end
+    RuntimeEnvironment.uorkeeMovementCleanup = nil
+    RuntimeEnvironment.uorkeeMovementState = nil
+end
+
 local function findRuntimeFunction(...)
     for index = 1, select("#", ...) do
         local name = select(index, ...)
@@ -210,6 +219,9 @@ local Settings = {
     AmbientModeEnabled = true,
     AmbientTintStrength = 0.24,
     AmbientParticleRate = 34,
+    NoclipEnabled = false,
+    SpeedEnabled = false,
+    SpeedValue = 32,
     InfiniteJumpEnabled = true,
     FakeLagEnabled = true,
     FakeLagHold = 0.25,
@@ -231,6 +243,10 @@ local Settings = {
     AimbotBindMode = "Toggle",
     TriggerbotKey = Enum.KeyCode.E,
     TriggerbotBindMode = "Toggle",
+    NoclipKey = Enum.KeyCode.N,
+    NoclipBindMode = "Toggle",
+    SpeedKey = Enum.KeyCode.V,
+    SpeedBindMode = "Toggle",
     TeleportOffset = 3,
     TeleportWhitelist = {"fffdtrrrr","rivalsmaster_new"
     },
@@ -276,12 +292,13 @@ local ConfigKeys = {
     "VictoryMusicId4", "VictoryMusicStartOffset4",
     "VictoryMusicId5", "VictoryMusicStartOffset5",
     "AmbientModeEnabled", "AmbientTintStrength", "AmbientParticleRate",
-    "InfiniteJumpEnabled",
+    "NoclipEnabled", "SpeedEnabled", "SpeedValue", "InfiniteJumpEnabled",
     "FakeLagEnabled", "FakeLagHold", "FakeLagRelease",
     "WallCheck", "ShowFOV", "RainbowFOV", "FOVRadius", "AimSpeed",
     "MenuOpacity", "Red", "Green", "Blue",
     "MenuKey", "TeleportKey", "TeleportBindMode",
     "AimbotKey", "AimbotBindMode", "TriggerbotKey", "TriggerbotBindMode",
+    "NoclipKey", "NoclipBindMode", "SpeedKey", "SpeedBindMode",
     "TeleportOffset", "TeleportWhitelist",
 }
 
@@ -290,12 +307,16 @@ local BindingSettingKeys = {
     TeleportKey = true,
     AimbotKey = true,
     TriggerbotKey = true,
+    NoclipKey = true,
+    SpeedKey = true,
 }
 
 local BindModeSettingKeys = {
     TeleportBindMode = true,
     AimbotBindMode = true,
     TriggerbotBindMode = true,
+    NoclipBindMode = true,
+    SpeedBindMode = true,
 }
 
 local ExpectedSettingTypes = {}
@@ -1662,6 +1683,12 @@ local function addBindControl(label, bindingSetting, modeSetting)
             AimbotBindHeld = false
         elseif modeSetting == "TriggerbotBindMode" then
             TriggerbotBindHeld = false
+        elseif modeSetting == "NoclipBindMode" then
+            local state = RuntimeEnvironment.uorkeeMovementState
+            if state then state.NoclipHeld = false end
+        elseif modeSetting == "SpeedBindMode" then
+            local state = RuntimeEnvironment.uorkeeMovementState
+            if state then state.SpeedHeld = false end
         end
         queueAutoSave()
     end
@@ -1684,6 +1711,8 @@ end
 addBindControl("Teleport", "TeleportKey", "TeleportBindMode")
 addBindControl("Aimbot", "AimbotKey", "AimbotBindMode")
 addBindControl("Triggerbot", "TriggerbotKey", "TriggerbotBindMode")
+addBindControl("Noclip", "NoclipKey", "NoclipBindMode")
+addBindControl("Speed", "SpeedKey", "SpeedBindMode")
 
 refreshKeyButtons = function()
     for settingKey, button in pairs(BindKeyButtons) do
@@ -1724,6 +1753,15 @@ end, "TeamCheck")
 
 Content = MenuUI.Pages.movement
 addSection("--- MOVEMENT ---")
+addToggle("Noclip", Settings.NoclipEnabled, function(value)
+    Settings.NoclipEnabled = value
+end, "NoclipEnabled")
+addToggle("Speed Boost", Settings.SpeedEnabled, function(value)
+    Settings.SpeedEnabled = value
+end, "SpeedEnabled")
+addSlider("Walk Speed: ", 16, 100, Settings.SpeedValue, 0, function(value)
+    Settings.SpeedValue = value
+end, "SpeedValue")
 addToggle("Infinite Jump", Settings.InfiniteJumpEnabled, function(value)
     Settings.InfiniteJumpEnabled = value
 end, "InfiniteJumpEnabled")
@@ -3385,6 +3423,108 @@ local InfiniteJumpConnection = UserInputService.JumpRequest:Connect(function()
 end)
 RuntimeEnvironment.uorkeeInfiniteJumpConnection = InfiniteJumpConnection
 
+do
+    local state = {
+        Alive = true,
+        NoclipHeld = false,
+        SpeedHeld = false,
+        NoclipCharacter = nil,
+        OriginalCollisions = setmetatable({}, {__mode = "k"}),
+        SpeedHumanoid = nil,
+        OriginalWalkSpeed = nil,
+        Connection = nil,
+    }
+    RuntimeEnvironment.uorkeeMovementState = state
+
+    state.NoclipActive = function()
+        if Settings.NoclipBindMode == "Hold" then
+            return state.NoclipHeld
+        end
+        return Settings.NoclipEnabled
+    end
+
+    state.SpeedActive = function()
+        if Settings.SpeedBindMode == "Hold" then
+            return state.SpeedHeld
+        end
+        return Settings.SpeedEnabled
+    end
+
+    state.RestoreNoclip = function()
+        for part, originalCanCollide in pairs(state.OriginalCollisions) do
+            pcall(function()
+                if part.Parent then
+                    part.CanCollide = originalCanCollide
+                end
+            end)
+        end
+        table.clear(state.OriginalCollisions)
+        state.NoclipCharacter = nil
+    end
+
+    state.RestoreSpeed = function()
+        if state.SpeedHumanoid and state.OriginalWalkSpeed ~= nil then
+            pcall(function()
+                if state.SpeedHumanoid.Parent then
+                    state.SpeedHumanoid.WalkSpeed = state.OriginalWalkSpeed
+                end
+            end)
+        end
+        state.SpeedHumanoid = nil
+        state.OriginalWalkSpeed = nil
+    end
+
+    state.Cleanup = function()
+        if not state.Alive then return end
+        state.Alive = false
+        if state.Connection then
+            pcall(function() state.Connection:Disconnect() end)
+            state.Connection = nil
+        end
+        state.RestoreNoclip()
+        state.RestoreSpeed()
+        if RuntimeEnvironment.uorkeeMovementState == state then
+            RuntimeEnvironment.uorkeeMovementState = nil
+            RuntimeEnvironment.uorkeeMovementCleanup = nil
+        end
+    end
+    RuntimeEnvironment.uorkeeMovementCleanup = state.Cleanup
+
+    state.Connection = RunService.Stepped:Connect(function()
+        if not state.Alive or stopped then return end
+
+        local character = LocalPlayer.Character
+        if state.NoclipActive() and character then
+            if state.NoclipCharacter ~= character then
+                state.RestoreNoclip()
+                state.NoclipCharacter = character
+            end
+            for _, descendant in ipairs(character:GetDescendants()) do
+                if descendant:IsA("BasePart") then
+                    if state.OriginalCollisions[descendant] == nil then
+                        state.OriginalCollisions[descendant] = descendant.CanCollide
+                    end
+                    descendant.CanCollide = false
+                end
+            end
+        elseif state.NoclipCharacter then
+            state.RestoreNoclip()
+        end
+
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        if state.SpeedActive() and humanoid and humanoid.Health > 0 then
+            if state.SpeedHumanoid ~= humanoid then
+                state.RestoreSpeed()
+                state.SpeedHumanoid = humanoid
+                state.OriginalWalkSpeed = humanoid.WalkSpeed
+            end
+            humanoid.WalkSpeed = Settings.SpeedValue
+        elseif state.SpeedHumanoid then
+            state.RestoreSpeed()
+        end
+    end)
+end
+
 local FakeLagRoot
 local fakeLagSleeping = false
 local nextFakeLagSwitch = 0
@@ -3498,6 +3638,9 @@ local function terminate()
     end
     local ambientCleanup = RuntimeEnvironment.uorkeeAmbientModeCleanup
     if type(ambientCleanup) == "function" then pcall(ambientCleanup) end
+    if type(RuntimeEnvironment.uorkeeMovementCleanup) == "function" then
+        pcall(RuntimeEnvironment.uorkeeMovementCleanup)
+    end
     for player in pairs(PlayerESP) do
         removePlayerESP(player)
     end
@@ -3540,12 +3683,9 @@ end
 
 MainInputConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if stopped then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton1 and not gameProcessed then
-        HitSoundAttackHeld = true
-        noteLocalAttack()
-    end
-    if gameProcessed then return end
 
+    -- Binding capture must run before the Roblox/UI processed-input guard.
+    -- Mouse clicks made while the menu is open are otherwise discarded.
     if waitingForBindingSetting then
         local binding = bindingFromInput(input)
         if binding then
@@ -3556,6 +3696,12 @@ MainInputConnection = UserInputService.InputBegan:Connect(function(input, gamePr
         end
         return
     end
+
+    if input.UserInputType == Enum.UserInputType.MouseButton1 and not gameProcessed then
+        HitSoundAttackHeld = true
+        noteLocalAttack()
+    end
+    if gameProcessed then return end
 
     if inputMatchesBinding(input, Settings.TeleportKey) then
         if Settings.TeleportBindMode == "Hold" then
@@ -3583,6 +3729,28 @@ MainInputConnection = UserInputService.InputBegan:Connect(function(input, gamePr
         end
     end
 
+    if inputMatchesBinding(input, Settings.NoclipKey) then
+        local state = RuntimeEnvironment.uorkeeMovementState
+        if state then
+            if Settings.NoclipBindMode == "Hold" then
+                state.NoclipHeld = true
+            else
+                toggleFeatureSetting("NoclipEnabled")
+            end
+        end
+    end
+
+    if inputMatchesBinding(input, Settings.SpeedKey) then
+        local state = RuntimeEnvironment.uorkeeMovementState
+        if state then
+            if Settings.SpeedBindMode == "Hold" then
+                state.SpeedHeld = true
+            else
+                toggleFeatureSetting("SpeedEnabled")
+            end
+        end
+    end
+
     if inputMatchesBinding(input, Settings.MenuKey) then
         MenuUI.setOpen(not MenuUI.Open)
     end
@@ -3601,6 +3769,14 @@ MainInputEndedConnection = UserInputService.InputEnded:Connect(function(input)
     end
     if inputMatchesBinding(input, Settings.TriggerbotKey) then
         TriggerbotBindHeld = false
+    end
+    if inputMatchesBinding(input, Settings.NoclipKey) then
+        local state = RuntimeEnvironment.uorkeeMovementState
+        if state then state.NoclipHeld = false end
+    end
+    if inputMatchesBinding(input, Settings.SpeedKey) then
+        local state = RuntimeEnvironment.uorkeeMovementState
+        if state then state.SpeedHeld = false end
     end
 end)
 RuntimeEnvironment.uorkeeInputConnections = {MainInputConnection, MainInputEndedConnection}
