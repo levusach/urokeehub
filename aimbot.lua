@@ -91,6 +91,15 @@ do
     RuntimeEnvironment.uorkeeCustomScopeState = nil
 end
 
+do
+    local previousCombatNotificationsCleanup = RuntimeEnvironment.uorkeeCombatNotificationsCleanup
+    if type(previousCombatNotificationsCleanup) == "function" then
+        pcall(previousCombatNotificationsCleanup)
+    end
+    RuntimeEnvironment.uorkeeCombatNotificationsCleanup = nil
+    RuntimeEnvironment.uorkeeCombatNotificationsState = nil
+end
+
 local function findRuntimeFunction(...)
     for index = 1, select("#", ...) do
         local name = select(index, ...)
@@ -237,6 +246,7 @@ local Settings = {
     AimbotEnabled = true,
     TriggerbotEnabled = true,
     TriggerDelay = 0.001,
+    CombatNotificationsEnabled = true,
     HitSoundEnabled = true,
     HitSoundVolume = 0.65,
     HitSoundPitch = 1.0,
@@ -327,6 +337,7 @@ local ConfigKeys = {
     "ESPEnabled", "NamesESP", "DeathStatueEnabled", "DeathStatueText",
     "AntiZoomEnabled", "AntiZoomFOV", "CustomScopeEnabled",
     "AimbotEnabled", "TriggerbotEnabled", "TriggerDelay",
+    "CombatNotificationsEnabled",
     "HitSoundEnabled", "HitSoundVolume", "HitSoundPitch",
     "HitSoundUseCustom", "HitSoundCustomId",
     "VictoryMusicEnabled", "VictoryMusicVolume",
@@ -354,6 +365,7 @@ RuntimeEnvironment.uorkeeConfigSections = {
         AimbotEnabled = true,
         TriggerbotEnabled = true,
         TriggerDelay = true,
+        CombatNotificationsEnabled = true,
         WallCheck = true,
         ShowFOV = true,
         RainbowFOV = true,
@@ -1958,6 +1970,9 @@ Content = MenuUI.Pages.combat
 addToggle("Team Check", Settings.TeamCheck, function(value)
     Settings.TeamCheck = value
 end, "TeamCheck")
+addToggle("Hit / Kill Notifications", Settings.CombatNotificationsEnabled, function(value)
+    Settings.CombatNotificationsEnabled = value
+end, "CombatNotificationsEnabled")
 
 Content = MenuUI.Pages.movement
 addSection("--- MOVEMENT ---")
@@ -2427,6 +2442,318 @@ local stopped = false
 local MainInputConnection
 local MainInputEndedConnection
 
+local CombatNotificationStack = create("Frame", ScreenGui, {
+    Name = "CombatNotifications",
+    AnchorPoint = Vector2.new(1, 0),
+    Position = UDim2.new(1, -24, 0, 88),
+    Size = UDim2.new(0, 356, 1, -112),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    Active = false,
+    ZIndex = 80,
+})
+create("UIListLayout", CombatNotificationStack, {
+    Padding = UDim.new(0, 10),
+    FillDirection = Enum.FillDirection.Vertical,
+    HorizontalAlignment = Enum.HorizontalAlignment.Right,
+    VerticalAlignment = Enum.VerticalAlignment.Top,
+    SortOrder = Enum.SortOrder.LayoutOrder,
+})
+
+local CombatNotificationState = {
+    Alive = true,
+    Sequence = 0,
+    Items = {},
+    ByPlayer = setmetatable({}, {__mode = "k"}),
+}
+RuntimeEnvironment.uorkeeCombatNotificationsState = CombatNotificationState
+
+local function notificationNumber(value)
+    value = math.max(tonumber(value) or 0, 0)
+    if math.abs(value - math.floor(value + 0.5)) < 0.05 then
+        return tostring(math.floor(value + 0.5))
+    end
+    return string.format("%.1f", value)
+end
+
+local function notificationPlayerName(player)
+    if not player then return "UNKNOWN" end
+    local displayName = tostring(player.DisplayName or "")
+    local userName = tostring(player.Name or "UNKNOWN")
+    if displayName ~= "" and displayName ~= userName then
+        return displayName .. "  @" .. userName
+    end
+    return userName
+end
+
+local function notificationAccent(kind)
+    local color = themeColor()
+    if kind == "kill" then
+        return color:Lerp(Color3.new(1, 1, 1), 0.24)
+    end
+    return color
+end
+
+local function dismissCombatNotification(item, immediate)
+    if not item or item.Dismissing then return end
+    item.Dismissing = true
+    if CombatNotificationState.ByPlayer[item.Player] == item then
+        CombatNotificationState.ByPlayer[item.Player] = nil
+    end
+
+    local function destroyItem()
+        CombatNotificationState.Items[item.Toast] = nil
+        if item.Toast and item.Toast.Parent then
+            pcall(function() item.Toast:Destroy() end)
+        end
+    end
+
+    if immediate or not item.Toast or not item.Toast.Parent then
+        destroyItem()
+        return
+    end
+
+    pcall(function()
+        TweenService:Create(
+            item.Toast,
+            TweenInfo.new(0.24, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
+            {
+                GroupTransparency = 1,
+                Size = UDim2.new(0, 0, 0, 76),
+            }
+        ):Play()
+    end)
+    task.delay(0.26, destroyItem)
+end
+
+local function updateCombatNotification(item, kind, damage, remainingHealth, maximumHealth)
+    if not item or not item.Toast or not item.Toast.Parent then return end
+    item.Kind = kind
+    item.LastUpdate = os.clock()
+    item.RemainingHealth = math.max(tonumber(remainingHealth) or 0, 0)
+    item.MaximumHealth = math.max(tonumber(maximumHealth) or 0, 0)
+    if kind == "hit" then
+        item.AccumulatedDamage = (item.AccumulatedDamage or 0)
+            + math.max(tonumber(damage) or 0, 0)
+    end
+
+    local accent = notificationAccent(kind)
+    item.Accent.BackgroundColor3 = accent
+    item.Stroke.Color = accent
+    item.Icon.TextColor3 = accent
+    item.BarFill.BackgroundColor3 = accent
+    item.Gradient.Color = liquidColors(accent, kind == "kill" and 0.64 or 0.72)
+
+    local targetName = notificationPlayerName(item.Player)
+    if kind == "kill" then
+        item.Title.Text = "ELIMINATED  " .. targetName
+        item.Detail.Text = "0 HP LEFT  |  TARGET DOWN"
+        item.Icon.Text = "KILL"
+        item.BarFill.Size = UDim2.new(0, 0, 1, 0)
+    else
+        item.Title.Text = "HIT  " .. targetName
+        item.Detail.Text = "-" .. notificationNumber(item.AccumulatedDamage)
+            .. " DAMAGE  |  " .. notificationNumber(item.RemainingHealth) .. " HP LEFT"
+        item.Icon.Text = "HIT"
+        local ratio = item.MaximumHealth > 0
+            and math.clamp(item.RemainingHealth / item.MaximumHealth, 0, 1)
+            or 0
+        item.BarFill.Size = UDim2.new(ratio, 0, 1, 0)
+    end
+
+    item.Stroke.Transparency = 0.08
+    pcall(function()
+        TweenService:Create(
+            item.Stroke,
+            TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+            {Transparency = 0.42}
+        ):Play()
+    end)
+
+    item.ExpireToken = {}
+    local expireToken = item.ExpireToken
+    task.delay(kind == "kill" and 4.2 or 3.0, function()
+        if CombatNotificationState.Alive and item.ExpireToken == expireToken then
+            dismissCombatNotification(item, false)
+        end
+    end)
+end
+
+local function createCombatNotification(player)
+    CombatNotificationState.Sequence += 1
+    local sequence = CombatNotificationState.Sequence
+    local toast = create("CanvasGroup", CombatNotificationStack, {
+        Name = "CombatToast_" .. tostring(sequence),
+        Size = UDim2.new(0, 0, 0, 76),
+        BackgroundColor3 = Color3.fromRGB(13, 17, 27),
+        BackgroundTransparency = 0.06,
+        BorderSizePixel = 0,
+        GroupTransparency = 1,
+        LayoutOrder = -sequence,
+        ZIndex = 81,
+    })
+    addCorner(toast, 15)
+    local stroke = addStroke(toast, themeColor(), 1.2, 0.42)
+    local gradient = addLiquidGradient(toast, 16)
+    local accent = create("Frame", toast, {
+        Name = "Accent",
+        Size = UDim2.new(0, 4, 1, -14),
+        Position = UDim2.new(0, 7, 0, 7),
+        BackgroundColor3 = themeColor(),
+        BorderSizePixel = 0,
+        ZIndex = 82,
+    })
+    addCorner(accent, 8)
+    local title = create("TextLabel", toast, {
+        Name = "Title",
+        Size = UDim2.new(1, -82, 0, 24),
+        Position = UDim2.new(0, 22, 0, 11),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Text = "HIT",
+        TextColor3 = Color3.fromRGB(247, 249, 255),
+        TextSize = 13,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        Font = Enum.Font.GothamBold,
+        ZIndex = 82,
+    })
+    local detail = create("TextLabel", toast, {
+        Name = "Detail",
+        Size = UDim2.new(1, -42, 0, 20),
+        Position = UDim2.new(0, 22, 0, 34),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Text = "",
+        TextColor3 = Color3.fromRGB(177, 187, 207),
+        TextSize = 10,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Font = Enum.Font.GothamMedium,
+        ZIndex = 82,
+    })
+    local icon = create("TextLabel", toast, {
+        Name = "Type",
+        AnchorPoint = Vector2.new(1, 0),
+        Size = UDim2.new(0, 48, 0, 22),
+        Position = UDim2.new(1, -13, 0, 12),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Text = "HIT",
+        TextColor3 = themeColor(),
+        TextSize = 10,
+        TextXAlignment = Enum.TextXAlignment.Right,
+        Font = Enum.Font.GothamBlack,
+        ZIndex = 82,
+    })
+    local bar = create("Frame", toast, {
+        Name = "HealthBar",
+        Size = UDim2.new(1, -35, 0, 4),
+        Position = UDim2.new(0, 22, 1, -13),
+        BackgroundColor3 = Color3.fromRGB(44, 50, 65),
+        BackgroundTransparency = 0.28,
+        BorderSizePixel = 0,
+        ClipsDescendants = true,
+        ZIndex = 82,
+    })
+    addCorner(bar, 8)
+    local barFill = create("Frame", bar, {
+        Name = "Fill",
+        Size = UDim2.fromScale(1, 1),
+        BackgroundColor3 = themeColor(),
+        BorderSizePixel = 0,
+        ZIndex = 83,
+    })
+    addCorner(barFill, 8)
+
+    local item = {
+        Player = player,
+        Toast = toast,
+        Stroke = stroke,
+        Gradient = gradient,
+        Accent = accent,
+        Title = title,
+        Detail = detail,
+        Icon = icon,
+        BarFill = barFill,
+        Sequence = sequence,
+        LastUpdate = os.clock(),
+        AccumulatedDamage = 0,
+    }
+    CombatNotificationState.Items[toast] = item
+    CombatNotificationState.ByPlayer[player] = item
+
+    local count = 0
+    local oldest
+    for _, other in pairs(CombatNotificationState.Items) do
+        count += 1
+        if other ~= item and (not oldest or other.Sequence < oldest.Sequence) then
+            oldest = other
+        end
+    end
+    if count > 5 and oldest then dismissCombatNotification(oldest, false) end
+
+    pcall(function()
+        TweenService:Create(
+            toast,
+            TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+            {
+                Size = UDim2.new(0, 348, 0, 76),
+                GroupTransparency = 0,
+            }
+        ):Play()
+    end)
+    return item
+end
+
+local function showCombatNotification(kind, player, damage, remainingHealth, maximumHealth)
+    if stopped or not CombatNotificationState.Alive
+        or not Settings.CombatNotificationsEnabled or not player then return end
+
+    local now = os.clock()
+    local item = CombatNotificationState.ByPlayer[player]
+    local canReuse = item and not item.Dismissing and item.Toast and item.Toast.Parent
+        and (kind == "kill" or (item.Kind == "hit" and now - item.LastUpdate <= 0.8))
+    if not canReuse then
+        item = createCombatNotification(player)
+    end
+    updateCombatNotification(item, kind, damage, remainingHealth, maximumHealth)
+end
+
+local function cleanupCombatNotifications()
+    if not CombatNotificationState.Alive then return end
+    CombatNotificationState.Alive = false
+    for _, item in pairs(CombatNotificationState.Items) do
+        dismissCombatNotification(item, true)
+    end
+    table.clear(CombatNotificationState.Items)
+    table.clear(CombatNotificationState.ByPlayer)
+    if CombatNotificationStack and CombatNotificationStack.Parent then
+        CombatNotificationStack:Destroy()
+    end
+    if RuntimeEnvironment.uorkeeCombatNotificationsState == CombatNotificationState then
+        RuntimeEnvironment.uorkeeCombatNotificationsState = nil
+        RuntimeEnvironment.uorkeeCombatNotificationsCleanup = nil
+    end
+end
+RuntimeEnvironment.uorkeeCombatNotificationsCleanup = cleanupCombatNotifications
+
+registerRefresh(function(color)
+    for toast, item in pairs(CombatNotificationState.Items) do
+        if not toast.Parent then
+            CombatNotificationState.Items[toast] = nil
+        else
+            local accent = item.Kind == "kill"
+                and color:Lerp(Color3.new(1, 1, 1), 0.24)
+                or color
+            item.Accent.BackgroundColor3 = accent
+            item.Stroke.Color = accent
+            item.Icon.TextColor3 = accent
+            item.BarFill.BackgroundColor3 = accent
+            item.Gradient.Color = liquidColors(accent, item.Kind == "kill" and 0.64 or 0.72)
+        end
+    end
+end)
+
 local function createPlayerESP(player)
     if player == LocalPlayer or PlayerESP[player] then
         return
@@ -2535,6 +2862,7 @@ end
 local HitSoundAlive = true
 local ActiveHitSounds = {}
 local LastAttackInputAt = -math.huge
+local LastAttackTarget = nil
 local HitSoundAttackHeld = false
 local LastHitSoundAt = -math.huge
 local DEFAULT_HIT_SOUND_ID = "rbxassetid://118671160608385"
@@ -2550,8 +2878,15 @@ local function selectedHitSoundId()
     return "rbxassetid://" .. digits
 end
 
-local function noteLocalAttack()
+local function noteLocalAttack(targetPlayer)
     LastAttackInputAt = os.clock()
+    LastAttackTarget = targetPlayer
+end
+
+local function recentLocalAttackMatches(player)
+    return player ~= nil
+        and LastAttackTarget == player
+        and os.clock() - LastAttackInputAt <= 1.25
 end
 
 local function destroyHitSound(sound)
@@ -2614,6 +2949,51 @@ local function damageCreatorIsLocal(humanoid)
     return nil
 end
 
+local function inferredMaximumHealth(player, source, previousHealth)
+    if source and source:IsA("Humanoid") then
+        return math.max(tonumber(source.MaxHealth) or 0, tonumber(previousHealth) or 0)
+    end
+
+    if source and source.Parent then
+        for _, name in ipairs({"MaxHealth", "MaxHP", "MaximumHealth", "MaximumHP"}) do
+            local maximum = source.Parent:FindFirstChild(name)
+            if maximum and maximum:IsA("ValueBase") then
+                local value = tonumber(maximum.Value)
+                if value and value > 0 then return value end
+            end
+        end
+    end
+
+    local character = player and player.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    if humanoid and humanoid.MaxHealth > 0 then
+        return humanoid.MaxHealth
+    end
+    return math.max(tonumber(previousHealth) or 0, 1)
+end
+
+local function confirmLocalDamage(player, record, source, previousHealth, currentHealth)
+    local now = os.clock()
+    local numericCurrent = tonumber(currentHealth) or 0
+    record.lastLocalHitAt = now
+
+    local duplicate = record.lastHitNoticeHealth ~= nil
+        and math.abs(record.lastHitNoticeHealth - numericCurrent) < 0.01
+        and now - (record.lastHitNoticeAt or -math.huge) <= 0.18
+    if duplicate then return end
+
+    record.lastHitNoticeAt = now
+    record.lastHitNoticeHealth = numericCurrent
+    playHitSound()
+    showCombatNotification(
+        "hit",
+        player,
+        math.max((tonumber(previousHealth) or numericCurrent) - numericCurrent, 0),
+        numericCurrent,
+        inferredMaximumHealth(player, source, previousHealth)
+    )
+end
+
 local function observeHumanoidHealth(player, record, humanoid, health)
     local numericHealth = tonumber(health)
     if not numericHealth then return end
@@ -2623,9 +3003,9 @@ local function observeHumanoidHealth(player, record, humanoid, health)
     if player == LocalPlayer or sameTeam(player) then return end
 
     local creatorIsLocal = damageCreatorIsLocal(humanoid)
-    local recentLocalAttack = HitSoundAttackHeld or os.clock() - LastAttackInputAt <= 1.25
+    local recentLocalAttack = recentLocalAttackMatches(player)
     if creatorIsLocal == true or (creatorIsLocal == nil and recentLocalAttack) then
-        playHitSound()
+        confirmLocalDamage(player, record, humanoid, previousHealth, numericHealth)
     end
 end
 
@@ -2633,6 +3013,7 @@ local function cleanupHitSound()
     if not HitSoundAlive then return end
     HitSoundAlive = false
     HitSoundAttackHeld = false
+    LastAttackTarget = nil
     for sound in pairs(ActiveHitSounds) do
         destroyHitSound(sound)
     end
@@ -3155,8 +3536,8 @@ local function observeCustomHealth(player, record, source, name, value)
     record.hitHealth[source] = value
     if previousHealth == nil or value >= previousHealth - 0.01 then return end
     if player == LocalPlayer or sameTeam(player) then return end
-    if HitSoundAttackHeld or os.clock() - LastAttackInputAt <= 1.25 then
-        playHitSound()
+    if recentLocalAttackMatches(player) then
+        confirmLocalDamage(player, record, source, previousHealth, value)
     end
 end
 
@@ -3166,10 +3547,29 @@ local function markDeath(player, character, record, reason, preparedStatue)
         return
     end
     record.dead = true
+    local localKillConfirmed = false
+    if player ~= LocalPlayer and not sameTeam(player) then
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        local creatorIsLocal = humanoid and damageCreatorIsLocal(humanoid)
+        local recentlyHitByLocal = record.lastLocalHitAt
+            and os.clock() - record.lastLocalHitAt <= 2.5
+        localKillConfirmed = creatorIsLocal == true
+            or (creatorIsLocal == nil and recentlyHitByLocal == true)
+        if localKillConfirmed then
+            showCombatNotification(
+                "kill",
+                player,
+                0,
+                0,
+                inferredMaximumHealth(player, humanoid, 0)
+            )
+        end
+    end
     if player ~= LocalPlayer and not detectedSameTeam(player) then
         task.defer(evaluateVictoryMusic)
     end
-    if not Settings.DeathStatueEnabled or player == LocalPlayer or sameTeam(player) then
+    if not Settings.DeathStatueEnabled or player == LocalPlayer or sameTeam(player)
+        or not localKillConfirmed then
         if preparedStatue then preparedStatue:Destroy() end
         return
     end
@@ -3216,8 +3616,8 @@ local function hookDeathAttributes(player, character, record, instance)
                 attributeHealth[key] = value
                 if previousHealth ~= nil and value < previousHealth - 0.01
                     and player ~= LocalPlayer and not sameTeam(player)
-                    and (HitSoundAttackHeld or os.clock() - LastAttackInputAt <= 1.25) then
-                    playHitSound()
+                    and recentLocalAttackMatches(player) then
+                    confirmLocalDamage(player, record, instance, previousHealth, value)
                 end
             end
             if indicatesCustomDeath(name, value) then
@@ -3665,7 +4065,7 @@ local function hoveredPlayer()
     end
 end
 
-local function clickLeftMouse()
+local function clickLeftMouse(targetPlayer)
     local environment = _G
     pcall(function()
         if getgenv then
@@ -3680,7 +4080,7 @@ local function clickLeftMouse()
 
     local click = rawget(environment, "mouse1click") or rawget(_G, "mouse1click")
     if type(click) == "function" then
-        noteLocalAttack()
+        noteLocalAttack(targetPlayer or hoveredPlayer())
         click()
         return true
     end
@@ -3688,7 +4088,7 @@ local function clickLeftMouse()
     local press = rawget(environment, "mouse1press") or rawget(_G, "mouse1press")
     local release = rawget(environment, "mouse1release") or rawget(_G, "mouse1release")
     if type(press) == "function" and type(release) == "function" then
-        noteLocalAttack()
+        noteLocalAttack(targetPlayer or hoveredPlayer())
         press()
         task.delay(0.015, release)
         return true
@@ -3703,13 +4103,19 @@ local function clickLeftMouse()
             virtualInput:SendMouseButtonEvent(point.X, point.Y, 0, false, game, 0)
         end)
     end)
-    if ok then noteLocalAttack() end
+    if ok then noteLocalAttack(targetPlayer or hoveredPlayer()) end
     return ok
 end
 
 RunService:BindToRenderStep("uorkeeESP", Enum.RenderPriority.Camera.Value, function()
     updateFeatureHUD()
     Camera = workspace.CurrentCamera
+    if HitSoundAttackHeld then
+        local attackTarget = hoveredPlayer()
+        if attackTarget and attackTarget ~= LocalPlayer and not sameTeam(attackTarget) then
+            noteLocalAttack(attackTarget)
+        end
+    end
     local color
     if Settings.RainbowFOV then
         color = Color3.fromHSV((tick() % 5) / 5, 1, 1)
@@ -3750,7 +4156,7 @@ RunService:BindToRenderStep("uorkeeTriggerbot", Enum.RenderPriority.Camera.Value
     local now = os.clock()
     if now - lastTrigger < Settings.TriggerDelay then return end
     lastTrigger = now
-    clickLeftMouse()
+    clickLeftMouse(player)
 end)
 
 RunService:BindToRenderStep("uorkeeTeleportBind", Enum.RenderPriority.Camera.Value + 3, function()
@@ -4450,6 +4856,10 @@ local function terminate()
     if RuntimeEnvironment.uorkeeHitSoundCleanup == cleanupHitSound then
         RuntimeEnvironment.uorkeeHitSoundCleanup = nil
     end
+    cleanupCombatNotifications()
+    if RuntimeEnvironment.uorkeeCombatNotificationsCleanup == cleanupCombatNotifications then
+        RuntimeEnvironment.uorkeeCombatNotificationsCleanup = nil
+    end
     cleanupVictoryMusic()
     if RuntimeEnvironment.uorkeeVictoryMusicCleanup == cleanupVictoryMusic then
         RuntimeEnvironment.uorkeeVictoryMusicCleanup = nil
@@ -4526,7 +4936,7 @@ MainInputConnection = UserInputService.InputBegan:Connect(function(input, gamePr
 
     if input.UserInputType == Enum.UserInputType.MouseButton1 and not gameProcessed then
         HitSoundAttackHeld = true
-        noteLocalAttack()
+        noteLocalAttack(hoveredPlayer())
     end
     if gameProcessed then return end
 
