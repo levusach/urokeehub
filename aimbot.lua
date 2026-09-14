@@ -51,6 +51,7 @@ do
     end
     RuntimeEnvironment.uorkeeAmbientModeCleanup = nil
     RuntimeEnvironment.uorkeeSetAmbientMode = nil
+    RuntimeEnvironment.uorkeeUpdateAmbient = nil
     RuntimeEnvironment.uorkeeAmbientState = nil
 end
 
@@ -207,6 +208,8 @@ local Settings = {
     VictoryMusicId5 = "",
     VictoryMusicStartOffset5 = 0,
     AmbientModeEnabled = true,
+    AmbientTintStrength = 0.24,
+    AmbientParticleRate = 34,
     InfiniteJumpEnabled = true,
     FakeLagEnabled = true,
     FakeLagHold = 0.25,
@@ -272,7 +275,7 @@ local ConfigKeys = {
     "VictoryMusicId3", "VictoryMusicStartOffset3",
     "VictoryMusicId4", "VictoryMusicStartOffset4",
     "VictoryMusicId5", "VictoryMusicStartOffset5",
-    "AmbientModeEnabled",
+    "AmbientModeEnabled", "AmbientTintStrength", "AmbientParticleRate",
     "InfiniteJumpEnabled",
     "FakeLagEnabled", "FakeLagHold", "FakeLagRelease",
     "WallCheck", "ShowFOV", "RainbowFOV", "FOVRadius", "AimSpeed",
@@ -1823,6 +1826,16 @@ addToggle("Ambient Mode (Tint + Air Particles)", Settings.AmbientModeEnabled, fu
     local setter = RuntimeEnvironment.uorkeeSetAmbientMode
     if setter then setter(value) end
 end, "AmbientModeEnabled")
+addSlider("Ambient Tint Strength: ", 0.05, 0.4, Settings.AmbientTintStrength, 2, function(value)
+    Settings.AmbientTintStrength = value
+    local updater = RuntimeEnvironment.uorkeeUpdateAmbient
+    if updater then updater() end
+end, "AmbientTintStrength")
+addSlider("Ambient Particle Density: ", 10, 60, Settings.AmbientParticleRate, 0, function(value)
+    Settings.AmbientParticleRate = value
+    local updater = RuntimeEnvironment.uorkeeUpdateAmbient
+    if updater then updater() end
+end, "AmbientParticleRate")
 
 Content = MenuUI.Pages.configs
 addSection("--- CONFIGS ---")
@@ -1938,9 +1951,9 @@ RuntimeEnvironment.uorkeeAmbientState.ColorEffect = create(
         Name = "uorkeeAmbientColor",
         Enabled = false,
         TintColor = Color3.new(1, 1, 1),
-        Brightness = 0.01,
-        Contrast = 0.015,
-        Saturation = 0.035,
+        Brightness = 0.018,
+        Contrast = 0.025,
+        Saturation = 0.075,
     }
 )
 RuntimeEnvironment.uorkeeAmbientState.ParticlePart = create("Part", workspace, {
@@ -1951,7 +1964,7 @@ RuntimeEnvironment.uorkeeAmbientState.ParticlePart = create("Part", workspace, {
     CanTouch = false,
     CastShadow = false,
     Transparency = 1,
-    Size = Vector3.new(42, 22, 42),
+    Size = Vector3.new(54, 28, 54),
     CFrame = Camera and Camera.CFrame or CFrame.new(),
 })
 RuntimeEnvironment.uorkeeAmbientState.Emitter = create(
@@ -1961,9 +1974,9 @@ RuntimeEnvironment.uorkeeAmbientState.Emitter = create(
         Name = "AmbientDust",
         Enabled = false,
         Texture = "rbxasset://textures/particles/sparkles_main.dds",
-        Rate = 12,
+        Rate = Settings.AmbientParticleRate,
         Color = ColorSequence.new(themeColor():Lerp(Color3.new(1, 1, 1), 0.42), themeColor()),
-        LightEmission = 0.68,
+        LightEmission = 0.82,
         LightInfluence = 0,
         EmissionDirection = Enum.NormalId.Top,
         SpreadAngle = Vector2.new(180, 180),
@@ -1975,22 +1988,61 @@ RuntimeEnvironment.uorkeeAmbientState.Emitter = create(
         ZOffset = -0.15,
     }
 )
+RuntimeEnvironment.uorkeeAmbientState.GlowEmitter = create(
+    "ParticleEmitter",
+    RuntimeEnvironment.uorkeeAmbientState.ParticlePart,
+    {
+        Name = "AmbientGlow",
+        Enabled = false,
+        Texture = "rbxasset://textures/particles/flare_main.dds",
+        Rate = math.max(4, Settings.AmbientParticleRate * 0.24),
+        Color = ColorSequence.new(themeColor():Lerp(Color3.new(1, 1, 1), 0.62), themeColor()),
+        LightEmission = 0.92,
+        LightInfluence = 0,
+        EmissionDirection = Enum.NormalId.Top,
+        SpreadAngle = Vector2.new(180, 180),
+        Rotation = NumberRange and NumberRange.new(0, 360) or nil,
+        RotSpeed = NumberRange and NumberRange.new(-9, 9) or nil,
+        Shape = Enum.ParticleEmitterShape.Box,
+        ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume,
+        ShapeInOut = Enum.ParticleEmitterShapeInOut.InAndOut,
+        ZOffset = -0.2,
+    }
+)
 pcall(function()
     local emitter = RuntimeEnvironment.uorkeeAmbientState.Emitter
-    emitter.Lifetime = NumberRange.new(4, 7)
-    emitter.Speed = NumberRange.new(0.22, 0.62)
-    emitter.Drag = 0.24
-    emitter.Acceleration = Vector3.new(0, 0.16, 0)
+    emitter.Lifetime = NumberRange.new(5, 8)
+    emitter.Speed = NumberRange.new(0.18, 0.55)
+    emitter.Drag = 0.3
+    emitter.Acceleration = Vector3.new(0, 0.2, 0)
     emitter.Size = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 0.035),
-        NumberSequenceKeypoint.new(0.24, 0.17),
-        NumberSequenceKeypoint.new(0.82, 0.11),
+        NumberSequenceKeypoint.new(0, 0.045),
+        NumberSequenceKeypoint.new(0.22, 0.23),
+        NumberSequenceKeypoint.new(0.78, 0.14),
         NumberSequenceKeypoint.new(1, 0),
     })
     emitter.Transparency = NumberSequence.new({
         NumberSequenceKeypoint.new(0, 1),
-        NumberSequenceKeypoint.new(0.2, 0.28),
-        NumberSequenceKeypoint.new(0.78, 0.5),
+        NumberSequenceKeypoint.new(0.16, 0.2),
+        NumberSequenceKeypoint.new(0.8, 0.42),
+        NumberSequenceKeypoint.new(1, 1),
+    })
+
+    local glow = RuntimeEnvironment.uorkeeAmbientState.GlowEmitter
+    glow.Lifetime = NumberRange.new(4.5, 7.5)
+    glow.Speed = NumberRange.new(0.06, 0.24)
+    glow.Drag = 0.38
+    glow.Acceleration = Vector3.new(0, 0.08, 0)
+    glow.Size = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0),
+        NumberSequenceKeypoint.new(0.22, 0.36),
+        NumberSequenceKeypoint.new(0.72, 0.25),
+        NumberSequenceKeypoint.new(1, 0),
+    })
+    glow.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 1),
+        NumberSequenceKeypoint.new(0.24, 0.46),
+        NumberSequenceKeypoint.new(0.74, 0.62),
         NumberSequenceKeypoint.new(1, 1),
     })
 end)
@@ -2002,25 +2054,41 @@ RuntimeEnvironment.uorkeeSetAmbientMode = function(enabled)
     if state.ColorEffect then state.ColorEffect.Enabled = state.Enabled end
     if state.Emitter then
         state.Emitter.Enabled = state.Enabled
-        if state.Enabled then pcall(function() state.Emitter:Emit(10) end) end
+        if state.Enabled then pcall(function() state.Emitter:Emit(24) end) end
+    end
+    if state.GlowEmitter then
+        state.GlowEmitter.Enabled = state.Enabled
+        if state.Enabled then pcall(function() state.GlowEmitter:Emit(8) end) end
     end
 end
 RuntimeEnvironment.uorkeeAmbientState.SetEnabled = RuntimeEnvironment.uorkeeSetAmbientMode
 
-registerRefresh(function(color)
+RuntimeEnvironment.uorkeeUpdateAmbient = function(color)
     local state = RuntimeEnvironment.uorkeeAmbientState
     if not state or not state.Alive then return end
     color = color or themeColor()
+    local strength = math.clamp(Settings.AmbientTintStrength, 0.05, 0.4)
     if state.ColorEffect then
-        state.ColorEffect.TintColor = Color3.new(1, 1, 1):Lerp(color, 0.115)
+        state.ColorEffect.TintColor = Color3.new(1, 1, 1):Lerp(color, strength)
+        state.ColorEffect.Saturation = 0.045 + strength * 0.14
     end
     if state.Emitter then
+        state.Emitter.Rate = Settings.AmbientParticleRate
         state.Emitter.Color = ColorSequence.new(
-            color:Lerp(Color3.new(1, 1, 1), 0.46),
-            color:Lerp(Color3.new(1, 1, 1), 0.08)
+            color:Lerp(Color3.new(1, 1, 1), 0.52),
+            color:Lerp(Color3.new(1, 1, 1), 0.04)
         )
     end
-end)
+    if state.GlowEmitter then
+        state.GlowEmitter.Rate = math.max(4, Settings.AmbientParticleRate * 0.24)
+        state.GlowEmitter.Color = ColorSequence.new(
+            color:Lerp(Color3.new(1, 1, 1), 0.7),
+            color:Lerp(Color3.new(1, 1, 1), 0.16)
+        )
+    end
+end
+RuntimeEnvironment.uorkeeAmbientState.Update = RuntimeEnvironment.uorkeeUpdateAmbient
+registerRefresh(RuntimeEnvironment.uorkeeUpdateAmbient)
 
 RunService:UnbindFromRenderStep("uorkeeAmbientMode")
 RunService:BindToRenderStep("uorkeeAmbientMode", Enum.RenderPriority.Camera.Value + 5, function()
@@ -2028,7 +2096,7 @@ RunService:BindToRenderStep("uorkeeAmbientMode", Enum.RenderPriority.Camera.Valu
     if not state or not state.Alive or not state.Enabled or not state.ParticlePart then return end
     local currentCamera = workspace.CurrentCamera
     if currentCamera then
-        state.ParticlePart.CFrame = currentCamera.CFrame * CFrame.new(0, 0, -9)
+        state.ParticlePart.CFrame = currentCamera.CFrame * CFrame.new(0, 0, -11)
     end
 end)
 
@@ -2041,6 +2109,9 @@ RuntimeEnvironment.uorkeeAmbientModeCleanup = function()
     if state.ParticlePart then pcall(function() state.ParticlePart:Destroy() end) end
     if RuntimeEnvironment.uorkeeSetAmbientMode == state.SetEnabled then
         RuntimeEnvironment.uorkeeSetAmbientMode = nil
+    end
+    if RuntimeEnvironment.uorkeeUpdateAmbient == state.Update then
+        RuntimeEnvironment.uorkeeUpdateAmbient = nil
     end
     if RuntimeEnvironment.uorkeeAmbientState == state then
         RuntimeEnvironment.uorkeeAmbientState = nil
