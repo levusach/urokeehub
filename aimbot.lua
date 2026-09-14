@@ -2634,9 +2634,13 @@ local function updateCombatNotification(item, kind, damage, remainingHealth, max
     local accent = notificationAccent(kind)
     item.Accent.BackgroundColor3 = accent
     item.Stroke.Color = accent
-    item.Icon.TextColor3 = accent
+    item.Icon.TextColor3 = accent:Lerp(Color3.new(0, 0, 0), 0.38)
     item.BarFill.BackgroundColor3 = accent
-    item.Gradient.Color = liquidColors(accent, kind == "kill" and 0.64 or 0.72)
+    item.Gradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255):Lerp(accent, 0.08)),
+        ColorSequenceKeypoint.new(0.48, Color3.fromRGB(244, 247, 253):Lerp(accent, 0.11)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(224, 231, 243):Lerp(accent, 0.18)),
+    })
 
     local targetName = notificationPlayerName(item.Player)
     if kind == "kill" then
@@ -2679,8 +2683,8 @@ local function createCombatNotification(player)
     local toast = create("CanvasGroup", CombatNotificationStack, {
         Name = "CombatToast_" .. tostring(sequence),
         Size = UDim2.new(0, 0, 0, 76),
-        BackgroundColor3 = Color3.fromRGB(13, 17, 27),
-        BackgroundTransparency = 0.06,
+        BackgroundColor3 = Color3.fromRGB(242, 246, 253),
+        BackgroundTransparency = 0.08,
         BorderSizePixel = 0,
         GroupTransparency = 1,
         LayoutOrder = -sequence,
@@ -2705,8 +2709,8 @@ local function createCombatNotification(player)
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
         Text = "HIT",
-        TextColor3 = Color3.fromRGB(247, 249, 255),
-        TextSize = 13,
+        TextColor3 = Color3.fromRGB(15, 20, 31),
+        TextSize = 14,
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd,
         Font = Enum.Font.GothamBold,
@@ -2719,8 +2723,8 @@ local function createCombatNotification(player)
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
         Text = "",
-        TextColor3 = Color3.fromRGB(177, 187, 207),
-        TextSize = 10,
+        TextColor3 = Color3.fromRGB(54, 63, 82),
+        TextSize = 11,
         TextXAlignment = Enum.TextXAlignment.Left,
         Font = Enum.Font.GothamMedium,
         ZIndex = 82,
@@ -2743,8 +2747,8 @@ local function createCombatNotification(player)
         Name = "HealthBar",
         Size = UDim2.new(1, -35, 0, 4),
         Position = UDim2.new(0, 22, 1, -13),
-        BackgroundColor3 = Color3.fromRGB(44, 50, 65),
-        BackgroundTransparency = 0.28,
+        BackgroundColor3 = Color3.fromRGB(159, 169, 188),
+        BackgroundTransparency = 0.24,
         BorderSizePixel = 0,
         ClipsDescendants = true,
         ZIndex = 82,
@@ -4234,10 +4238,17 @@ RunService:BindToRenderStep("uorkeeESP", Enum.RenderPriority.Camera.Value, funct
 end)
 
 RunService:BindToRenderStep("uorkeeAimlock", Enum.RenderPriority.Camera.Value + 1, function()
-    if not aimbotBindActive() then return end
+    if not aimbotBindActive() then
+        RuntimeEnvironment.uorkeeAimTargetPart = nil
+        return
+    end
     Camera = workspace.CurrentCamera
-    if not Camera then return end
+    if not Camera then
+        RuntimeEnvironment.uorkeeAimTargetPart = nil
+        return
+    end
     local target = closestTarget()
+    RuntimeEnvironment.uorkeeAimTargetPart = target
     if not target then return end
     local goal = CFrame.new(Camera.CFrame.Position, target.Position)
     Camera.CFrame = Camera.CFrame:Lerp(goal, math.clamp(Settings.AimSpeed / 10, 0, 1))
@@ -4247,11 +4258,46 @@ local lastTrigger = -math.huge
 RunService:BindToRenderStep("uorkeeTriggerbot", Enum.RenderPriority.Camera.Value + 2, function()
     if not triggerbotBindActive() then return end
 
-    local player = hoveredPlayer()
+    Camera = workspace.CurrentCamera
+    if not Camera then return end
+
+    local aimedHead = aimbotBindActive() and RuntimeEnvironment.uorkeeAimTargetPart or nil
+    local player
+    if aimedHead and aimedHead.Parent then
+        player = Players:GetPlayerFromCharacter(aimedHead.Parent)
+    else
+        player = hoveredPlayer()
+    end
     if not player or player == LocalPlayer or sameTeam(player) then return end
 
     local character = characterInfo(player)
     if not character then return end
+
+    local head = character:FindFirstChild("Head")
+    if not head or (aimedHead and aimedHead ~= head) then return end
+
+    -- Lerp approaches its target gradually. Wait until the head is genuinely
+    -- under the centre crosshair instead of firing during the camera sweep.
+    local projected, onScreen = Camera:WorldToViewportPoint(head.Position)
+    if not onScreen or projected.Z <= 0 then return end
+    local centre = viewportCenter()
+    local aimError = (Vector2.new(projected.X, projected.Y) - centre).Magnitude
+    local edge = Camera:WorldToViewportPoint(
+        head.Position + Camera.CFrame.RightVector * math.max(head.Size.X * 0.5, 0.25)
+    )
+    local projectedRadius = math.abs(edge.X - projected.X)
+    local allowedError = math.clamp(projectedRadius * 0.18, 1.25, 3.5)
+    if aimError > allowedError then return end
+
+    -- Always perform this obstruction check for trigger shots, independently
+    -- of the optional aimbot wall-check setting.
+    local raycastParameters = RaycastParams.new()
+    raycastParameters.FilterType = Enum.RaycastFilterType.Exclude
+    raycastParameters.FilterDescendantsInstances = {LocalPlayer.Character}
+    raycastParameters.IgnoreWater = true
+    local origin = Camera.CFrame.Position
+    local hit = workspace:Raycast(origin, head.Position - origin, raycastParameters)
+    if not hit or not hit.Instance or not hit.Instance:IsDescendantOf(character) then return end
 
     local now = os.clock()
     if now - lastTrigger < Settings.TriggerDelay then return end
