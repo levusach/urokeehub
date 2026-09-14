@@ -82,6 +82,15 @@ do
     RuntimeEnvironment.uorkeeAntiZoomState = nil
 end
 
+do
+    local previousCustomScopeCleanup = RuntimeEnvironment.uorkeeCustomScopeCleanup
+    if type(previousCustomScopeCleanup) == "function" then
+        pcall(previousCustomScopeCleanup)
+    end
+    RuntimeEnvironment.uorkeeCustomScopeCleanup = nil
+    RuntimeEnvironment.uorkeeCustomScopeState = nil
+end
+
 local function findRuntimeFunction(...)
     for index = 1, select("#", ...) do
         local name = select(index, ...)
@@ -205,6 +214,7 @@ pcall(function()
         RunService:UnbindFromRenderStep(prefix .. "TeleportBind")
         RunService:UnbindFromRenderStep(prefix .. "ForceThirdPerson")
         RunService:UnbindFromRenderStep(prefix .. "AntiZoom")
+        RunService:UnbindFromRenderStep(prefix .. "CustomScope")
         RunService:UnbindFromRenderStep(prefix .. "SpinBot")
         RunService:UnbindFromRenderStep(prefix .. "MovementBypass")
         RunService:UnbindFromRenderStep(prefix .. "FakeLag")
@@ -222,6 +232,7 @@ local Settings = {
     DeathStatueText = "REST IN NEON — {player}",
     AntiZoomEnabled = true,
     AntiZoomFOV = 70,
+    CustomScopeEnabled = true,
 
     AimbotEnabled = true,
     TriggerbotEnabled = true,
@@ -314,7 +325,7 @@ local requestVictoryMusicEvaluation
 local ConfigKeys = {
     "TeamCheck",
     "ESPEnabled", "NamesESP", "DeathStatueEnabled", "DeathStatueText",
-    "AntiZoomEnabled", "AntiZoomFOV",
+    "AntiZoomEnabled", "AntiZoomFOV", "CustomScopeEnabled",
     "AimbotEnabled", "TriggerbotEnabled", "TriggerDelay",
     "HitSoundEnabled", "HitSoundVolume", "HitSoundPitch",
     "HitSoundUseCustom", "HitSoundCustomId",
@@ -375,6 +386,7 @@ RuntimeEnvironment.uorkeeConfigSections = {
         DeathStatueText = true,
         AntiZoomEnabled = true,
         AntiZoomFOV = true,
+        CustomScopeEnabled = true,
     },
     Movement = {
         NoclipEnabled = true,
@@ -802,6 +814,39 @@ local ScreenGui = create("ScreenGui", CoreGui, {
     ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 })
 
+local CustomScopeOverlay = create("Frame", ScreenGui, {
+    Name = "CustomScopeOverlay",
+    Size = UDim2.fromScale(1, 1),
+    Position = UDim2.fromScale(0, 0),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    Active = false,
+    Visible = false,
+    ZIndex = 15,
+})
+
+local CustomScopeHorizontal = create("Frame", CustomScopeOverlay, {
+    Name = "Horizontal",
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.fromScale(0.5, 0.5),
+    Size = UDim2.new(1, 0, 0, 2),
+    BackgroundColor3 = themeColor(),
+    BackgroundTransparency = 0,
+    BorderSizePixel = 0,
+    ZIndex = 15,
+})
+
+local CustomScopeVertical = create("Frame", CustomScopeOverlay, {
+    Name = "Vertical",
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.fromScale(0.5, 0.5),
+    Size = UDim2.new(0, 2, 1, 0),
+    BackgroundColor3 = themeColor(),
+    BackgroundTransparency = 0,
+    BorderSizePixel = 0,
+    ZIndex = 15,
+})
+
 local MenuButton = create("TextButton", ScreenGui, {
     Name = "MenuButton",
     Size = UDim2.new(0, 52, 0, 52),
@@ -1178,6 +1223,8 @@ local function refreshTheme()
     MenuUI.SideStroke.Color = color
     MenuUI.BodyStroke.Color = color
     MenuUI.Sweep.BackgroundColor3 = color
+    CustomScopeHorizontal.BackgroundColor3 = color
+    CustomScopeVertical.BackgroundColor3 = color
     MenuUI.paintTabs()
     for _, page in pairs(MenuUI.Pages) do page.ScrollBarImageColor3 = color end
     for _, particle in ipairs(MenuUI.Particles) do
@@ -1950,6 +1997,9 @@ end, "AntiZoomEnabled")
 addSlider("Protected FOV: ", 50, 100, Settings.AntiZoomFOV, 0, function(value)
     Settings.AntiZoomFOV = value
 end, "AntiZoomFOV")
+addToggle("Custom Scope", Settings.CustomScopeEnabled, function(value)
+    Settings.CustomScopeEnabled = value
+end, "CustomScopeEnabled")
 addSection("--- ESP SETTINGS ---")
 addToggle("Enable ESP", Settings.ESPEnabled, function(value) Settings.ESPEnabled = value end, "ESPEnabled")
 addToggle("Names ESP", Settings.NamesESP, function(value) Settings.NamesESP = value end, "NamesESP")
@@ -4164,6 +4214,132 @@ do
     )
 end
 
+do
+    local state = {
+        Alive = true,
+        CurrentInterface = nil,
+        CurrentScope = nil,
+        HiddenImages = setmetatable({}, {__mode = "k"}),
+    }
+    RuntimeEnvironment.uorkeeCustomScopeState = state
+
+    state.RestoreImages = function()
+        for image, original in pairs(state.HiddenImages) do
+            if image and image.Parent then
+                pcall(function()
+                    image.Visible = original.Visible
+                    image.ImageTransparency = original.ImageTransparency
+                end)
+            end
+        end
+        table.clear(state.HiddenImages)
+        state.CurrentInterface = nil
+        state.CurrentScope = nil
+        if CustomScopeOverlay and CustomScopeOverlay.Parent then
+            CustomScopeOverlay.Visible = false
+        end
+    end
+
+    state.HideImage = function(image)
+        if not image or not image.Parent then return end
+        if not (image:IsA("ImageLabel") or image:IsA("ImageButton")) then return end
+        if not state.HiddenImages[image] then
+            state.HiddenImages[image] = {
+                Visible = image.Visible,
+                ImageTransparency = image.ImageTransparency,
+            }
+        end
+        image.Visible = false
+        image.ImageTransparency = 1
+    end
+
+    state.FindEquippedScope = function()
+        local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+        local mainGui = playerGui and playerGui:FindFirstChild("MainGui")
+        local mainFrame = mainGui and mainGui:FindFirstChild("MainFrame")
+        local itemInterfaces = mainFrame and mainFrame:FindFirstChild("ItemInterfaces")
+        if not itemInterfaces then return nil, nil end
+
+        local playerPrefix = LocalPlayer.Name .. " - "
+        local fallbackInterface
+        local fallbackScope
+        for _, itemInterface in ipairs(itemInterfaces:GetChildren()) do
+            if itemInterface:IsA("GuiObject") and itemInterface.Visible then
+                local mouseInterface = itemInterface:FindFirstChild("Mouse")
+                local scope = mouseInterface and mouseInterface:FindFirstChild("Scope")
+                if scope and scope:IsA("GuiObject") then
+                    if itemInterface.Name:sub(1, #playerPrefix) == playerPrefix then
+                        return itemInterface, scope
+                    end
+                    fallbackInterface = fallbackInterface or itemInterface
+                    fallbackScope = fallbackScope or scope
+                end
+            end
+        end
+        return fallbackInterface, fallbackScope
+    end
+
+    state.Cleanup = function()
+        if not state.Alive then return end
+        state.Alive = false
+        pcall(function() RunService:UnbindFromRenderStep("uorkeeCustomScope") end)
+        state.RestoreImages()
+        if RuntimeEnvironment.uorkeeCustomScopeState == state then
+            RuntimeEnvironment.uorkeeCustomScopeState = nil
+            RuntimeEnvironment.uorkeeCustomScopeCleanup = nil
+        end
+    end
+    RuntimeEnvironment.uorkeeCustomScopeCleanup = state.Cleanup
+
+    RunService:BindToRenderStep(
+        "uorkeeCustomScope",
+        Enum.RenderPriority.Last.Value + 7,
+        function()
+            if not state.Alive or stopped then return end
+            if not Settings.CustomScopeEnabled then
+                if state.CurrentScope or CustomScopeOverlay.Visible then
+                    state.RestoreImages()
+                end
+                return
+            end
+
+            local itemInterface, scope = state.FindEquippedScope()
+            local rmbHeld = UserInputService:IsMouseButtonPressed(
+                Enum.UserInputType.MouseButton2
+            )
+            local scopeActive = scope and (scope.Visible or rmbHeld)
+
+            if not scopeActive then
+                if state.CurrentScope or CustomScopeOverlay.Visible then
+                    state.RestoreImages()
+                end
+                return
+            end
+
+            if state.CurrentScope ~= scope then
+                state.RestoreImages()
+                state.CurrentInterface = itemInterface
+                state.CurrentScope = scope
+            end
+
+            for _, descendant in ipairs(scope:GetDescendants()) do
+                if descendant:IsA("ImageLabel") or descendant:IsA("ImageButton") then
+                    state.HideImage(descendant)
+                end
+            end
+
+            local aimingVignette = itemInterface:FindFirstChild("AimingVignette")
+            if aimingVignette then
+                state.HideImage(aimingVignette)
+            end
+
+            CustomScopeHorizontal.BackgroundColor3 = themeColor()
+            CustomScopeVertical.BackgroundColor3 = themeColor()
+            CustomScopeOverlay.Visible = true
+        end
+    )
+end
+
 local FakeLagRoot
 local fakeLagSleeping = false
 local nextFakeLagSwitch = 0
@@ -4250,6 +4426,7 @@ local function terminate()
     pcall(function() RunService:UnbindFromRenderStep("uorkeeTeleportBind") end)
     pcall(function() RunService:UnbindFromRenderStep("uorkeeForceThirdPerson") end)
     pcall(function() RunService:UnbindFromRenderStep("uorkeeAntiZoom") end)
+    pcall(function() RunService:UnbindFromRenderStep("uorkeeCustomScope") end)
     pcall(function() RunService:UnbindFromRenderStep("uorkeeFakeLag") end)
     restoreFakeLag()
     if MainInputConnection then
@@ -4287,6 +4464,9 @@ local function terminate()
     end
     if type(RuntimeEnvironment.uorkeeAntiZoomCleanup) == "function" then
         pcall(RuntimeEnvironment.uorkeeAntiZoomCleanup)
+    end
+    if type(RuntimeEnvironment.uorkeeCustomScopeCleanup) == "function" then
+        pcall(RuntimeEnvironment.uorkeeCustomScopeCleanup)
     end
     for player in pairs(PlayerESP) do
         removePlayerESP(player)
