@@ -2876,14 +2876,91 @@ local function showNeonStatue(player, statue, reason)
     local stroke = addStroke(label, themeColor(), 1.4, 0.2)
 
     local parts = {}
+    local fires = {}
+    local fireColor = statueColor:Lerp(Color3.new(0, 0, 0), 0.2)
+    local fireSecondaryColor = statueColor:Lerp(Color3.new(0, 0, 0), 0.42)
     for _, descendant in ipairs(statue:GetDescendants()) do
         if descendant:IsA("BasePart") and descendant.Transparency < 0.95 then
             parts[#parts + 1] = descendant
+            local lowerName = string.lower(descendant.Name)
+            local carriesFire = lowerName == "head" or lowerName == "torso"
+                or lowerName == "uppertorso" or lowerName == "lowertorso"
+                or lowerName == "leftupperarm" or lowerName == "rightupperarm"
+                or lowerName == "leftupperleg" or lowerName == "rightupperleg"
+                or lowerName == "left arm" or lowerName == "right arm"
+                or lowerName == "left leg" or lowerName == "right leg"
+            if carriesFire then
+                local flame
+                pcall(function()
+                    flame = create("Fire", descendant, {
+                        Name = "uorkeeNeonFire",
+                        Color = fireColor,
+                        SecondaryColor = fireSecondaryColor,
+                        Heat = 4.5,
+                        Size = math.clamp(
+                            math.max(descendant.Size.X, descendant.Size.Y, descendant.Size.Z) * 1.15,
+                            1.35,
+                            3.8
+                        ),
+                    })
+                end)
+                if flame then fires[#fires + 1] = flame end
+            end
         end
+    end
+
+    local glowParent = statue:FindFirstChild("UpperTorso", true)
+        or statue:FindFirstChild("Torso", true)
+        or statue:FindFirstChild("LowerTorso", true)
+        or adornee
+    local glowLight
+    local emberEmitter
+    if glowParent and glowParent:IsA("BasePart") then
+        pcall(function()
+            glowLight = create("PointLight", glowParent, {
+                Name = "uorkeeNeonFireGlow",
+                Color = fireColor,
+                Brightness = 1.55,
+                Range = 12,
+                Shadows = false,
+            })
+        end)
+        pcall(function()
+            emberEmitter = create("ParticleEmitter", glowParent, {
+                Name = "uorkeeNeonEmbers",
+                Texture = "rbxasset://textures/particles/sparkles_main.dds",
+                Enabled = true,
+                Rate = 18,
+                Color = ColorSequence.new(fireColor, fireSecondaryColor),
+                LightEmission = 1,
+                LightInfluence = 0,
+                Lifetime = NumberRange.new(0.55, 1.35),
+                Speed = NumberRange.new(1.1, 2.8),
+                Drag = 0.65,
+                Acceleration = Vector3.new(0, 3.2, 0),
+                EmissionDirection = Enum.NormalId.Top,
+                SpreadAngle = Vector2.new(32, 32),
+                Rotation = NumberRange.new(0, 360),
+                RotSpeed = NumberRange.new(-75, 75),
+                Size = NumberSequence.new({
+                    NumberSequenceKeypoint.new(0, 0.08),
+                    NumberSequenceKeypoint.new(0.3, 0.2),
+                    NumberSequenceKeypoint.new(1, 0),
+                }),
+                Transparency = NumberSequence.new({
+                    NumberSequenceKeypoint.new(0, 0.12),
+                    NumberSequenceKeypoint.new(0.72, 0.3),
+                    NumberSequenceKeypoint.new(1, 1),
+                }),
+            })
+        end)
     end
     ActiveStatues[statue] = {
         player = player,
         parts = parts,
+        fires = fires,
+        glowLight = glowLight,
+        emberEmitter = emberEmitter,
         label = label,
         stroke = stroke,
         outline = outline,
@@ -2901,12 +2978,26 @@ end
 
 registerRefresh(function(color)
     color = color or themeColor()
+    local fireColor = color:Lerp(Color3.new(0, 0, 0), 0.2)
+    local fireSecondaryColor = color:Lerp(Color3.new(0, 0, 0), 0.42)
     for statue, data in pairs(ActiveStatues) do
         if not statue.Parent then
             ActiveStatues[statue] = nil
         else
             for _, part in ipairs(data.parts) do
                 if part.Parent then part.Color = color end
+            end
+            for _, flame in ipairs(data.fires or {}) do
+                if flame.Parent then
+                    flame.Color = fireColor
+                    flame.SecondaryColor = fireSecondaryColor
+                end
+            end
+            if data.glowLight and data.glowLight.Parent then
+                data.glowLight.Color = fireColor
+            end
+            if data.emberEmitter and data.emberEmitter.Parent then
+                data.emberEmitter.Color = ColorSequence.new(fireColor, fireSecondaryColor)
             end
             if data.label and data.label.Parent then data.label.TextColor3 = color end
             if data.stroke and data.stroke.Parent then data.stroke.Color = color end
