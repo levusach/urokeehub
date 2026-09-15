@@ -228,6 +228,7 @@ pcall(function()
         RunService:UnbindFromRenderStep(prefix .. "Aimlock")
         RunService:UnbindFromRenderStep(prefix .. "Triggerbot")
         RunService:UnbindFromRenderStep(prefix .. "TeleportBind")
+        RunService:UnbindFromRenderStep(prefix .. "BackstabTeleport")
         RunService:UnbindFromRenderStep(prefix .. "ForceThirdPerson")
         RunService:UnbindFromRenderStep(prefix .. "AntiZoom")
         RunService:UnbindFromRenderStep(prefix .. "CustomScope")
@@ -299,6 +300,8 @@ local Settings = {
     MenuKey = Enum.KeyCode.RightShift,
     TeleportKey = Enum.KeyCode.T,
     TeleportBindMode = "Hold",
+    BackstabTeleportKey = Enum.KeyCode.B,
+    BackstabTeleportBindMode = "Hold",
     AimbotKey = Enum.KeyCode.Q,
     AimbotBindMode = "Toggle",
     TriggerbotKey = Enum.KeyCode.E,
@@ -334,6 +337,9 @@ local ConfigSessionToken = {}
 RuntimeEnvironment.uorkeeConfigSessionToken = ConfigSessionToken
 local TeleportBindHeld = false
 local TeleportBindToggled = false
+local BackstabTeleportBindHeld = false
+local BackstabTeleportBindToggled = false
+local BackstabTeleportTarget
 local AimbotBindHeld = false
 local TriggerbotBindHeld = false
 local nextTeleportBindAt = 0
@@ -365,6 +371,7 @@ local ConfigKeys = {
     "WallCheck", "AimSpeed",
     "MenuOpacity", "FeatureHUDX", "FeatureHUDY", "Red", "Green", "Blue",
     "MenuKey", "TeleportKey", "TeleportBindMode",
+    "BackstabTeleportKey", "BackstabTeleportBindMode",
     "AimbotKey", "AimbotBindMode", "TriggerbotKey", "TriggerbotBindMode",
     "NoclipKey", "NoclipBindMode",
     "FlyKey", "FlyBindMode",
@@ -431,6 +438,8 @@ RuntimeEnvironment.uorkeeConfigSections = {
         MenuKey = true,
         TeleportKey = true,
         TeleportBindMode = true,
+        BackstabTeleportKey = true,
+        BackstabTeleportBindMode = true,
         AimbotKey = true,
         AimbotBindMode = true,
         TriggerbotKey = true,
@@ -470,6 +479,7 @@ RuntimeEnvironment.uorkeeConfigSectionLabels = {
 local BindingSettingKeys = {
     MenuKey = true,
     TeleportKey = true,
+    BackstabTeleportKey = true,
     AimbotKey = true,
     TriggerbotKey = true,
     NoclipKey = true,
@@ -479,6 +489,7 @@ local BindingSettingKeys = {
 
 local BindModeSettingKeys = {
     TeleportBindMode = true,
+    BackstabTeleportBindMode = true,
     AimbotBindMode = true,
     TriggerbotBindMode = true,
     NoclipBindMode = true,
@@ -1999,6 +2010,10 @@ local function addBindControl(label, bindingSetting, modeSetting)
             TeleportBindHeld = false
             TeleportBindToggled = false
             nextTeleportBindAt = 0
+        elseif modeSetting == "BackstabTeleportBindMode" then
+            BackstabTeleportBindHeld = false
+            BackstabTeleportBindToggled = false
+            BackstabTeleportTarget = nil
         elseif modeSetting == "AimbotBindMode" then
             AimbotBindHeld = false
         elseif modeSetting == "TriggerbotBindMode" then
@@ -2035,6 +2050,7 @@ local function addBindControl(label, bindingSetting, modeSetting)
 end
 
 addBindControl("Teleport", "TeleportKey", "TeleportBindMode")
+addBindControl("Behind Target", "BackstabTeleportKey", "BackstabTeleportBindMode")
 addBindControl("Aimbot", "AimbotKey", "AimbotBindMode")
 addBindControl("Triggerbot", "TriggerbotKey", "TriggerbotBindMode")
 addBindControl("Noclip", "NoclipKey", "NoclipBindMode")
@@ -2205,10 +2221,10 @@ end
 Content = MenuUI.Pages.combat
 do
 local combatPage = Content
-local _, aimBody = MenuUI.makeSettingsCard("Aim & Trigger", "Aimbot target tracking and automatic firing.")
+local _, aimBody = MenuUI.makeSettingsCard("Aim & Trigger", "Aimbot target tracking and automatic firing. Knife uses RMB.")
 Content = aimBody
 addToggle("Enable Aimbot", Settings.AimbotEnabled, function(value) Settings.AimbotEnabled = value end, "AimbotEnabled")
-addToggle("Auto LMB (Triggerbot)", Settings.TriggerbotEnabled, function(value)
+addToggle("Auto Fire (Knife: RMB)", Settings.TriggerbotEnabled, function(value)
     Settings.TriggerbotEnabled = value
 end, "TriggerbotEnabled")
 Content = combatPage
@@ -4801,7 +4817,86 @@ local function hoveredPlayer()
     end
 end
 
-local function clickLeftMouse(targetPlayer)
+local function backstabTeleportActive()
+    if Settings.BackstabTeleportBindMode == "Hold" then
+        return BackstabTeleportBindHeld
+    end
+    return BackstabTeleportBindToggled
+end
+
+local function eligibleBackstabRoot(player)
+    if not player or player == LocalPlayer or player.Parent ~= Players
+        or sameTeam(player) or isTeleportWhitelisted(player) then
+        return nil
+    end
+    local _, root = characterInfo(player)
+    return root
+end
+
+local function chooseBackstabTarget(localRoot)
+    local hovered = hoveredPlayer()
+    if eligibleBackstabRoot(hovered) then return hovered end
+
+    local nearest, nearestDistance
+    for _, player in ipairs(Players:GetPlayers()) do
+        local root = eligibleBackstabRoot(player)
+        if root then
+            local distance = (root.Position - localRoot.Position).Magnitude
+            if not nearest or distance < nearestDistance then
+                nearest, nearestDistance = player, distance
+            end
+        end
+    end
+    return nearest
+end
+
+local function followBackstabTarget()
+    if not backstabTeleportActive() then
+        BackstabTeleportTarget = nil
+        return
+    end
+
+    local localCharacter, localRoot = characterInfo(LocalPlayer)
+    if not localCharacter or not localRoot then return end
+    local targetRoot = eligibleBackstabRoot(BackstabTeleportTarget)
+    if not targetRoot then
+        BackstabTeleportTarget = chooseBackstabTarget(localRoot)
+        targetRoot = eligibleBackstabRoot(BackstabTeleportTarget)
+    end
+    if not targetRoot then return end
+
+    -- +Z is behind a Roblox character; keep our own rotation so the camera
+    -- does not snap whenever the target turns.
+    local distance = math.max(2, tonumber(Settings.TeleportOffset) or 3)
+    local behind = targetRoot.CFrame * CFrame.new(0, 0, distance)
+    localCharacter:PivotTo(CFrame.new(behind.Position) * localRoot.CFrame.Rotation)
+end
+
+local function holdingKnife()
+    local character = LocalPlayer.Character
+    local equippedTool = character and character:FindFirstChildOfClass("Tool")
+    if equippedTool then
+        return equippedTool.Name == "Knife"
+    end
+
+    -- This game also uses custom item interfaces instead of ordinary Tools.
+    local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    local mainGui = playerGui and playerGui:FindFirstChild("MainGui")
+    local mainFrame = mainGui and mainGui:FindFirstChild("MainFrame")
+    local itemInterfaces = mainFrame and mainFrame:FindFirstChild("ItemInterfaces")
+    if not itemInterfaces then return false end
+
+    local localKnifeName = LocalPlayer.Name .. " - Knife"
+    for _, itemInterface in ipairs(itemInterfaces:GetChildren()) do
+        if itemInterface:IsA("GuiObject") and itemInterface.Visible
+            and (itemInterface.Name == localKnifeName or itemInterface.Name == "Knife") then
+            return true
+        end
+    end
+    return false
+end
+
+local function clickTriggerMouse(targetPlayer, rightButton)
     local environment = _G
     pcall(function()
         if getgenv then
@@ -4814,15 +4909,19 @@ local function clickLeftMouse(targetPlayer)
         return false
     end
 
-    local click = rawget(environment, "mouse1click") or rawget(_G, "mouse1click")
+    local buttonName = rightButton and "mouse2" or "mouse1"
+    local click = rawget(environment, buttonName .. "click")
+        or rawget(_G, buttonName .. "click")
     if type(click) == "function" then
         noteLocalAttack(targetPlayer or hoveredPlayer())
         click()
         return true
     end
 
-    local press = rawget(environment, "mouse1press") or rawget(_G, "mouse1press")
-    local release = rawget(environment, "mouse1release") or rawget(_G, "mouse1release")
+    local press = rawget(environment, buttonName .. "press")
+        or rawget(_G, buttonName .. "press")
+    local release = rawget(environment, buttonName .. "release")
+        or rawget(_G, buttonName .. "release")
     if type(press) == "function" and type(release) == "function" then
         noteLocalAttack(targetPlayer or hoveredPlayer())
         press()
@@ -4832,11 +4931,12 @@ local function clickLeftMouse(targetPlayer)
 
     -- Fallback for executors which expose Roblox's virtual input service.
     local point = UserInputService:GetMouseLocation()
+    local buttonIndex = rightButton and 1 or 0
     local ok = pcall(function()
         local virtualInput = game:GetService("VirtualInputManager")
-        virtualInput:SendMouseButtonEvent(point.X, point.Y, 0, true, game, 0)
+        virtualInput:SendMouseButtonEvent(point.X, point.Y, buttonIndex, true, game, 0)
         task.delay(0.015, function()
-            virtualInput:SendMouseButtonEvent(point.X, point.Y, 0, false, game, 0)
+            virtualInput:SendMouseButtonEvent(point.X, point.Y, buttonIndex, false, game, 0)
         end)
     end)
     if ok then noteLocalAttack(targetPlayer or hoveredPlayer()) end
@@ -4930,10 +5030,11 @@ RunService:BindToRenderStep("uorkeeTriggerbot", Enum.RenderPriority.Camera.Value
     local now = os.clock()
     if now - lastTrigger < Settings.TriggerDelay then return end
     lastTrigger = now
-    clickLeftMouse(player)
+    clickTriggerMouse(player, holdingKnife())
 end)
 
 RunService:BindToRenderStep("uorkeeTeleportBind", Enum.RenderPriority.Camera.Value + 3, function()
+    if backstabTeleportActive() then return end
     local active
     if Settings.TeleportBindMode == "Hold" then
         active = TeleportBindHeld
@@ -4946,6 +5047,11 @@ RunService:BindToRenderStep("uorkeeTeleportBind", Enum.RenderPriority.Camera.Val
     if now < nextTeleportBindAt then return end
     nextTeleportBindAt = now + 0.18
     teleportToNearestPlayer()
+end)
+
+RunService:BindToRenderStep("uorkeeBackstabTeleport", Enum.RenderPriority.Camera.Value - 1, function()
+    if stopped then return end
+    followBackstabTarget()
 end)
 
 local InfiniteJumpConnection = UserInputService.JumpRequest:Connect(function()
@@ -5537,6 +5643,7 @@ MenuUI.terminate = function()
     pcall(function() RunService:UnbindFromRenderStep("uorkeeESP") end)
     pcall(function() RunService:UnbindFromRenderStep("uorkeeTriggerbot") end)
     pcall(function() RunService:UnbindFromRenderStep("uorkeeTeleportBind") end)
+    pcall(function() RunService:UnbindFromRenderStep("uorkeeBackstabTeleport") end)
     pcall(function() RunService:UnbindFromRenderStep("uorkeeForceThirdPerson") end)
     pcall(function() RunService:UnbindFromRenderStep("uorkeeCustomScope") end)
     pcall(function() RunService:UnbindFromRenderStep("uorkeeFakeLag") end)
@@ -5639,10 +5746,16 @@ MainInputConnection = UserInputService.InputBegan:Connect(function(input, gamePr
     -- Binding capture must run before the Roblox/UI processed-input guard.
     -- Mouse clicks made while the menu is open are otherwise discarded.
     if waitingForBindingSetting then
+        local capturedSetting = waitingForBindingSetting
         local binding = InputHelpers.FromInput(input)
         if binding then
-            Settings[waitingForBindingSetting] = binding
+            Settings[capturedSetting] = binding
             waitingForBindingSetting = nil
+            if capturedSetting == "BackstabTeleportKey" then
+                BackstabTeleportBindHeld = false
+                BackstabTeleportBindToggled = false
+                BackstabTeleportTarget = nil
+            end
             refreshKeyButtons()
             queueAutoSave()
         end
@@ -5655,7 +5768,24 @@ MainInputConnection = UserInputService.InputBegan:Connect(function(input, gamePr
     end
     if gameProcessed then return end
 
-    if InputHelpers.Matches(input, Settings.TeleportKey) then
+    local pressedBackstabKey = InputHelpers.Matches(input, Settings.BackstabTeleportKey)
+    if pressedBackstabKey then
+        local wasActive = backstabTeleportActive()
+        if Settings.BackstabTeleportBindMode == "Hold" then
+            BackstabTeleportBindHeld = true
+        else
+            BackstabTeleportBindToggled = not BackstabTeleportBindToggled
+        end
+        if backstabTeleportActive() then
+            if not wasActive then BackstabTeleportTarget = nil end
+            followBackstabTarget()
+        else
+            BackstabTeleportTarget = nil
+        end
+    end
+
+    if not pressedBackstabKey and not backstabTeleportActive()
+        and InputHelpers.Matches(input, Settings.TeleportKey) then
         if Settings.TeleportBindMode == "Hold" then
             TeleportBindHeld = true
         else
@@ -5726,6 +5856,12 @@ MainInputEndedConnection = UserInputService.InputEnded:Connect(function(input)
     if stopped then return end
     if InputHelpers.Matches(input, Settings.TeleportKey) then
         TeleportBindHeld = false
+    end
+    if InputHelpers.Matches(input, Settings.BackstabTeleportKey) then
+        BackstabTeleportBindHeld = false
+        if Settings.BackstabTeleportBindMode == "Hold" then
+            BackstabTeleportTarget = nil
+        end
     end
     if InputHelpers.Matches(input, Settings.AimbotKey) then
         AimbotBindHeld = false
