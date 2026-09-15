@@ -291,6 +291,8 @@ local Settings = {
     AimSpeed = 10,
 
     MenuOpacity = 0.0,
+    FeatureHUDX = 82,
+    FeatureHUDY = 18,
     Red = 28,
     Green = 30,
     Blue = 234,
@@ -361,7 +363,7 @@ local ConfigKeys = {
     "ForceThirdPersonEnabled", "ThirdPersonDistance",
     "FakeLagEnabled", "FakeLagHold", "FakeLagRelease",
     "WallCheck", "AimSpeed",
-    "MenuOpacity", "Red", "Green", "Blue",
+    "MenuOpacity", "FeatureHUDX", "FeatureHUDY", "Red", "Green", "Blue",
     "MenuKey", "TeleportKey", "TeleportBindMode",
     "AimbotKey", "AimbotBindMode", "TriggerbotKey", "TriggerbotBindMode",
     "NoclipKey", "NoclipBindMode",
@@ -442,6 +444,8 @@ RuntimeEnvironment.uorkeeConfigSections = {
     },
     Appearance = {
         MenuOpacity = true,
+        FeatureHUDX = true,
+        FeatureHUDY = true,
         Red = true,
         Green = true,
         Blue = true,
@@ -890,6 +894,7 @@ local MenuButton = create("TextButton", ScreenGui, {
     TextSize = 20,
     Font = Enum.Font.GothamMedium,
     AutoButtonColor = false,
+    ZIndex = 12,
 })
 addCorner(MenuButton, 16)
 local MenuButtonStroke = addStroke(MenuButton, Color3.fromRGB(255, 255, 255), 1, 0.72)
@@ -899,6 +904,7 @@ local MenuButtonDot = create("Frame", MenuButton, {
     Position = UDim2.new(1, -10, 0, 5),
     BackgroundColor3 = themeColor(),
     BorderSizePixel = 0,
+    ZIndex = 13,
 })
 addCorner(MenuButtonDot, 20)
 addLiquidHover(MenuButton, 0.18, 0.08)
@@ -1024,6 +1030,7 @@ create("TextLabel", HeaderGlass, {
 })
 
 local MenuUI = {Open = false, Alive = true, Serial = 0, Tweens = {}, Pages = {}, Tabs = {}, Particles = {}}
+local setFeatureHUDInteractive
 local CloseButton = create("TextButton", HeaderGlass, {
     Name = "Close",
     Size = UDim2.new(0, 32, 0, 32),
@@ -1215,6 +1222,7 @@ function MenuUI.setOpen(open)
     if not MenuUI.Alive or MenuUI.Open == open then return end
     if RuntimeEnvironment.uorkeeConfigSessionToken ~= ConfigSessionToken then return end
     MenuUI.Open = open
+    if setFeatureHUDInteractive then setFeatureHUDInteractive(open) end
     MenuUI.Serial = MenuUI.Serial + 1
     local serial = MenuUI.Serial
     for _, tween in ipairs(MenuUI.Tweens) do tween:Cancel() end
@@ -4602,12 +4610,14 @@ local function triggerbotBindActive()
 end
 
 local updateFeatureHUD
+local FeatureHUDDragMoveConnection
+local FeatureHUDDragEndConnection
 do
     -- Keep the status panel visible even when the settings menu is closed.
     local state = {}
     state.Hud = create("Frame", ScreenGui, {
         Name = "FeatureHUD",
-        Position = UDim2.new(0, 82, 0, 18),
+        Position = UDim2.fromOffset(Settings.FeatureHUDX, Settings.FeatureHUDY),
         Size = UDim2.new(0, 190, 0, 90),
         BackgroundColor3 = Color3.fromRGB(18, 21, 31),
         BackgroundTransparency = glassTransparency(),
@@ -4650,10 +4660,108 @@ do
         TextXAlignment = Enum.TextXAlignment.Left,
         ZIndex = 9,
     })
+    state.DragHandle = create("TextButton", state.Hud, {
+        Name = "DragHandle",
+        Size = UDim2.fromScale(1, 1),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Text = "",
+        AutoButtonColor = false,
+        Active = true,
+        Visible = false,
+        ZIndex = 10,
+    })
     state.OnColor = Color3.fromRGB(127, 235, 170)
     state.OffColor = Color3.fromRGB(232, 154, 154)
 
+    local function setHUDPosition(x, y)
+        local currentCamera = workspace.CurrentCamera or Camera
+        local viewport = currentCamera and currentCamera.ViewportSize or Vector2.new(1920, 1080)
+        if viewport.X <= 0 or viewport.Y <= 0 then
+            viewport = Vector2.new(1920, 1080)
+        end
+        local hudSize = state.Hud.AbsoluteSize
+        local width = hudSize.X > 0 and hudSize.X or 190
+        local height = hudSize.Y > 0 and hudSize.Y or 90
+        x = math.floor(math.clamp(tonumber(x) or 82, 0, math.max(0, viewport.X - width)) + 0.5)
+        y = math.floor(math.clamp(tonumber(y) or 18, 0, math.max(0, viewport.Y - height)) + 0.5)
+        state.Hud.Position = UDim2.fromOffset(x, y)
+        Settings.FeatureHUDX = x
+        Settings.FeatureHUDY = y
+    end
+
+    local function finishHUDDrag()
+        if not state.Dragging then return end
+        state.Dragging = false
+        state.TouchInput = nil
+        if Settings.FeatureHUDX ~= state.StartX or Settings.FeatureHUDY ~= state.StartY then
+            queueAutoSave()
+        end
+    end
+
+    state.DragHandle.InputBegan:Connect(function(input)
+        if not MenuUI.Open or waitingForBindingSetting then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1
+            and input.UserInputType ~= Enum.UserInputType.Touch then return end
+        state.Dragging = true
+        state.StartPointer = input.Position
+        state.StartX = Settings.FeatureHUDX
+        state.StartY = Settings.FeatureHUDY
+        state.TouchInput = input.UserInputType == Enum.UserInputType.Touch and input or nil
+    end)
+
+    FeatureHUDDragMoveConnection = UserInputService.InputChanged:Connect(function(input)
+        if not state.Dragging or not MenuUI.Open then return end
+        if state.TouchInput then
+            if input ~= state.TouchInput then return end
+        elseif input.UserInputType ~= Enum.UserInputType.MouseMovement then
+            return
+        end
+        local delta = input.Position - state.StartPointer
+        setHUDPosition(state.StartX + delta.X, state.StartY + delta.Y)
+    end)
+
+    FeatureHUDDragEndConnection = UserInputService.InputEnded:Connect(function(input)
+        if not state.Dragging then return end
+        if (state.TouchInput and input == state.TouchInput)
+            or (not state.TouchInput and input.UserInputType == Enum.UserInputType.MouseButton1) then
+            finishHUDDrag()
+        end
+    end)
+    RuntimeEnvironment.uorkeeInputConnections = {
+        FeatureHUDDragMoveConnection, FeatureHUDDragEndConnection,
+    }
+
+    setFeatureHUDInteractive = function(open)
+        state.DragHandle.Visible = open
+        state.Hud.ZIndex = open and 30 or 8
+        state.Title.ZIndex = open and 31 or 9
+        state.AimLabel.ZIndex = open and 31 or 9
+        state.TriggerLabel.ZIndex = open and 31 or 9
+        state.DragHandle.ZIndex = open and 32 or 10
+        state.Title.Text = open and "uorkee hub  [drag]" or "uorkee hub"
+        if not open then finishHUDDrag() end
+    end
+
+    ConfigControls.FeatureHUDX = function()
+        setHUDPosition(Settings.FeatureHUDX, Settings.FeatureHUDY)
+    end
+    ConfigControls.FeatureHUDY = ConfigControls.FeatureHUDX
+    setHUDPosition(Settings.FeatureHUDX, Settings.FeatureHUDY)
+
     updateFeatureHUD = function()
+        local currentCamera = workspace.CurrentCamera or Camera
+        local viewport = currentCamera and currentCamera.ViewportSize
+        if viewport and viewport.X > 0 and viewport.Y > 0
+            and (viewport.X ~= state.ViewportX or viewport.Y ~= state.ViewportY) then
+            state.ViewportX, state.ViewportY = viewport.X, viewport.Y
+            local oldX, oldY = Settings.FeatureHUDX, Settings.FeatureHUDY
+            setHUDPosition(oldX, oldY)
+            if not state.Dragging
+                and (Settings.FeatureHUDX ~= oldX or Settings.FeatureHUDY ~= oldY) then
+                queueAutoSave()
+            end
+        end
         -- Use the same activation checks as the features, including held binds.
         local aimActive = aimbotBindActive()
         local triggerActive = triggerbotBindActive()
@@ -5441,6 +5549,14 @@ MenuUI.terminate = function()
         pcall(function() MainInputEndedConnection:Disconnect() end)
         MainInputEndedConnection = nil
     end
+    if FeatureHUDDragMoveConnection then
+        pcall(function() FeatureHUDDragMoveConnection:Disconnect() end)
+        FeatureHUDDragMoveConnection = nil
+    end
+    if FeatureHUDDragEndConnection then
+        pcall(function() FeatureHUDDragEndConnection:Disconnect() end)
+        FeatureHUDDragEndConnection = nil
+    end
     RuntimeEnvironment.uorkeeInputConnections = nil
     pcall(function() InfiniteJumpConnection:Disconnect() end)
     if RuntimeEnvironment.uorkeeInfiniteJumpConnection == InfiniteJumpConnection then
@@ -5630,7 +5746,10 @@ MainInputEndedConnection = UserInputService.InputEnded:Connect(function(input)
         if state then state.Held = false end
     end
 end)
-RuntimeEnvironment.uorkeeInputConnections = {MainInputConnection, MainInputEndedConnection}
+RuntimeEnvironment.uorkeeInputConnections = {
+    MainInputConnection, MainInputEndedConnection,
+    FeatureHUDDragMoveConnection, FeatureHUDDragEndConnection,
+}
 
 refreshTheme()
 
