@@ -337,9 +337,7 @@ local ConfigSessionToken = {}
 RuntimeEnvironment.uorkeeConfigSessionToken = ConfigSessionToken
 local TeleportBindHeld = false
 local TeleportBindToggled = false
-local BackstabTeleportBindHeld = false
-local BackstabTeleportBindToggled = false
-local BackstabTeleportTarget
+RuntimeEnvironment.uorkeeBackstabState = {Held = false, Toggled = false, Target = nil}
 local AimbotBindHeld = false
 local TriggerbotBindHeld = false
 local nextTeleportBindAt = 0
@@ -2011,9 +2009,8 @@ local function addBindControl(label, bindingSetting, modeSetting)
             TeleportBindToggled = false
             nextTeleportBindAt = 0
         elseif modeSetting == "BackstabTeleportBindMode" then
-            BackstabTeleportBindHeld = false
-            BackstabTeleportBindToggled = false
-            BackstabTeleportTarget = nil
+            local state = RuntimeEnvironment.uorkeeBackstabState
+            state.Held, state.Toggled, state.Target = false, false, nil
         elseif modeSetting == "AimbotBindMode" then
             AimbotBindHeld = false
         elseif modeSetting == "TriggerbotBindMode" then
@@ -4817,14 +4814,15 @@ local function hoveredPlayer()
     end
 end
 
-local function backstabTeleportActive()
+RuntimeEnvironment.uorkeeBackstabState.Active = function()
+    local state = RuntimeEnvironment.uorkeeBackstabState
     if Settings.BackstabTeleportBindMode == "Hold" then
-        return BackstabTeleportBindHeld
+        return state.Held
     end
-    return BackstabTeleportBindToggled
+    return state.Toggled
 end
 
-local function eligibleBackstabRoot(player)
+RuntimeEnvironment.uorkeeBackstabState.EligibleRoot = function(player)
     if not player or player == LocalPlayer or player.Parent ~= Players
         or sameTeam(player) or isTeleportWhitelisted(player) then
         return nil
@@ -4833,13 +4831,14 @@ local function eligibleBackstabRoot(player)
     return root
 end
 
-local function chooseBackstabTarget(localRoot)
+RuntimeEnvironment.uorkeeBackstabState.ChooseTarget = function(localRoot)
+    local state = RuntimeEnvironment.uorkeeBackstabState
     local hovered = hoveredPlayer()
-    if eligibleBackstabRoot(hovered) then return hovered end
+    if state.EligibleRoot(hovered) then return hovered end
 
     local nearest, nearestDistance
     for _, player in ipairs(Players:GetPlayers()) do
-        local root = eligibleBackstabRoot(player)
+        local root = state.EligibleRoot(player)
         if root then
             local distance = (root.Position - localRoot.Position).Magnitude
             if not nearest or distance < nearestDistance then
@@ -4850,18 +4849,19 @@ local function chooseBackstabTarget(localRoot)
     return nearest
 end
 
-local function followBackstabTarget()
-    if not backstabTeleportActive() then
-        BackstabTeleportTarget = nil
+RuntimeEnvironment.uorkeeBackstabState.Follow = function()
+    local state = RuntimeEnvironment.uorkeeBackstabState
+    if not state.Active() then
+        state.Target = nil
         return
     end
 
     local localCharacter, localRoot = characterInfo(LocalPlayer)
     if not localCharacter or not localRoot then return end
-    local targetRoot = eligibleBackstabRoot(BackstabTeleportTarget)
+    local targetRoot = state.EligibleRoot(state.Target)
     if not targetRoot then
-        BackstabTeleportTarget = chooseBackstabTarget(localRoot)
-        targetRoot = eligibleBackstabRoot(BackstabTeleportTarget)
+        state.Target = state.ChooseTarget(localRoot)
+        targetRoot = state.EligibleRoot(state.Target)
     end
     if not targetRoot then return end
 
@@ -4872,7 +4872,7 @@ local function followBackstabTarget()
     localCharacter:PivotTo(CFrame.new(behind.Position) * localRoot.CFrame.Rotation)
 end
 
-local function holdingKnife()
+RuntimeEnvironment.uorkeeIsKnifeHeld = function()
     local character = LocalPlayer.Character
     local equippedTool = character and character:FindFirstChildOfClass("Tool")
     if equippedTool then
@@ -4992,8 +4992,17 @@ RunService:BindToRenderStep("uorkeeTriggerbot", Enum.RenderPriority.Camera.Value
     end
     if not player or player == LocalPlayer or sameTeam(player) then return end
 
-    local character = characterInfo(player)
+    local character, targetRoot = characterInfo(player)
     if not character then return end
+
+    local knifeEquipped = RuntimeEnvironment.uorkeeIsKnifeHeld()
+    if knifeEquipped then
+        local _, localRoot = characterInfo(LocalPlayer)
+        if not localRoot or not targetRoot
+            or (targetRoot.Position - localRoot.Position).Magnitude > 5 then
+            return
+        end
+    end
 
     local head = aimedHead
         or character:FindFirstChild("HitboxHead")
@@ -5006,7 +5015,7 @@ RunService:BindToRenderStep("uorkeeTriggerbot", Enum.RenderPriority.Camera.Value
     -- event being consumed after RenderStepped without aiming outside the head.
     local origin = Camera.CFrame.Position
     local aimPosition = head.Position
-    if aimedHead then
+    if aimedHead and not knifeEquipped then
         local velocity = head.AssemblyLinearVelocity
         aimPosition += velocity * math.clamp(1 / 90, 0, 0.014)
         Camera.CFrame = CFrame.new(origin, aimPosition)
@@ -5030,11 +5039,11 @@ RunService:BindToRenderStep("uorkeeTriggerbot", Enum.RenderPriority.Camera.Value
     local now = os.clock()
     if now - lastTrigger < Settings.TriggerDelay then return end
     lastTrigger = now
-    clickTriggerMouse(player, holdingKnife())
+    clickTriggerMouse(player, knifeEquipped)
 end)
 
 RunService:BindToRenderStep("uorkeeTeleportBind", Enum.RenderPriority.Camera.Value + 3, function()
-    if backstabTeleportActive() then return end
+    if RuntimeEnvironment.uorkeeBackstabState.Active() then return end
     local active
     if Settings.TeleportBindMode == "Hold" then
         active = TeleportBindHeld
@@ -5051,7 +5060,7 @@ end)
 
 RunService:BindToRenderStep("uorkeeBackstabTeleport", Enum.RenderPriority.Camera.Value - 1, function()
     if stopped then return end
-    followBackstabTarget()
+    RuntimeEnvironment.uorkeeBackstabState.Follow()
 end)
 
 local InfiniteJumpConnection = UserInputService.JumpRequest:Connect(function()
@@ -5752,9 +5761,8 @@ MainInputConnection = UserInputService.InputBegan:Connect(function(input, gamePr
             Settings[capturedSetting] = binding
             waitingForBindingSetting = nil
             if capturedSetting == "BackstabTeleportKey" then
-                BackstabTeleportBindHeld = false
-                BackstabTeleportBindToggled = false
-                BackstabTeleportTarget = nil
+                local state = RuntimeEnvironment.uorkeeBackstabState
+                state.Held, state.Toggled, state.Target = false, false, nil
             end
             refreshKeyButtons()
             queueAutoSave()
@@ -5768,23 +5776,24 @@ MainInputConnection = UserInputService.InputBegan:Connect(function(input, gamePr
     end
     if gameProcessed then return end
 
+    local backstabState = RuntimeEnvironment.uorkeeBackstabState
     local pressedBackstabKey = InputHelpers.Matches(input, Settings.BackstabTeleportKey)
     if pressedBackstabKey then
-        local wasActive = backstabTeleportActive()
+        local wasActive = backstabState.Active()
         if Settings.BackstabTeleportBindMode == "Hold" then
-            BackstabTeleportBindHeld = true
+            backstabState.Held = true
         else
-            BackstabTeleportBindToggled = not BackstabTeleportBindToggled
+            backstabState.Toggled = not backstabState.Toggled
         end
-        if backstabTeleportActive() then
-            if not wasActive then BackstabTeleportTarget = nil end
-            followBackstabTarget()
+        if backstabState.Active() then
+            if not wasActive then backstabState.Target = nil end
+            backstabState.Follow()
         else
-            BackstabTeleportTarget = nil
+            backstabState.Target = nil
         end
     end
 
-    if not pressedBackstabKey and not backstabTeleportActive()
+    if not pressedBackstabKey and not backstabState.Active()
         and InputHelpers.Matches(input, Settings.TeleportKey) then
         if Settings.TeleportBindMode == "Hold" then
             TeleportBindHeld = true
@@ -5858,9 +5867,10 @@ MainInputEndedConnection = UserInputService.InputEnded:Connect(function(input)
         TeleportBindHeld = false
     end
     if InputHelpers.Matches(input, Settings.BackstabTeleportKey) then
-        BackstabTeleportBindHeld = false
+        local state = RuntimeEnvironment.uorkeeBackstabState
+        state.Held = false
         if Settings.BackstabTeleportBindMode == "Hold" then
-            BackstabTeleportTarget = nil
+            state.Target = nil
         end
     end
     if InputHelpers.Matches(input, Settings.AimbotKey) then
