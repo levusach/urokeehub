@@ -247,8 +247,6 @@ local Settings = {
     BoundaryESPEnabled = true,
     DeathStatueEnabled = true,
     DeathStatueText = "REST IN NEON — {player}",
-    AntiZoomEnabled = true,
-    AntiZoomFOV = 70,
     CustomScopeEnabled = true,
 
     AimbotEnabled = true,
@@ -288,9 +286,6 @@ local Settings = {
     FakeLagHold = 0.25,
     FakeLagRelease = 0.04,
     WallCheck = true,
-    ShowFOV = false,
-    RainbowFOV = false,
-    FOVRadius = 1000,
     AimSpeed = 10,
 
     MenuOpacity = 0.0,
@@ -344,7 +339,7 @@ local requestVictoryMusicEvaluation
 local ConfigKeys = {
     "TeamCheck",
     "ESPEnabled", "NamesESP", "BoundaryESPEnabled", "DeathStatueEnabled", "DeathStatueText",
-    "AntiZoomEnabled", "AntiZoomFOV", "CustomScopeEnabled",
+    "CustomScopeEnabled",
     "AimbotEnabled", "TriggerbotEnabled", "TriggerDelay",
     "CombatNotificationsEnabled",
     "HitSoundEnabled", "HitSoundVolume", "HitSoundPitch",
@@ -361,7 +356,7 @@ local ConfigKeys = {
     "NoclipEnabled", "InfiniteJumpEnabled",
     "ForceThirdPersonEnabled", "ThirdPersonDistance",
     "FakeLagEnabled", "FakeLagHold", "FakeLagRelease",
-    "WallCheck", "ShowFOV", "RainbowFOV", "FOVRadius", "AimSpeed",
+    "WallCheck", "AimSpeed",
     "MenuOpacity", "Red", "Green", "Blue",
     "MenuKey", "TeleportKey", "TeleportBindMode",
     "AimbotKey", "AimbotBindMode", "TriggerbotKey", "TriggerbotBindMode",
@@ -378,9 +373,6 @@ RuntimeEnvironment.uorkeeConfigSections = {
         TriggerDelay = true,
         CombatNotificationsEnabled = true,
         WallCheck = true,
-        ShowFOV = true,
-        RainbowFOV = true,
-        FOVRadius = true,
         AimSpeed = true,
     },
     Audio = {
@@ -413,8 +405,6 @@ RuntimeEnvironment.uorkeeConfigSections = {
         BoundaryESPEnabled = true,
         DeathStatueEnabled = true,
         DeathStatueText = true,
-        AntiZoomEnabled = true,
-        AntiZoomFOV = true,
         CustomScopeEnabled = true,
     },
     Movement = {
@@ -756,14 +746,6 @@ end
 local function viewportCenter()
     return Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
 end
-
-local FOVCircle = Drawing.new("Circle")
-FOVCircle.Position = viewportCenter()
-FOVCircle.Radius = Settings.FOVRadius
-FOVCircle.Filled = false
-FOVCircle.Visible = Settings.ShowFOV
-FOVCircle.Thickness = 1.5
-FOVCircle.Color = themeColor()
 
 local function create(className, parent, properties)
     local object = Instance.new(className)
@@ -2161,14 +2143,8 @@ end
 Content = MenuUI.Pages.visuals
 do
 local visualsPage = Content
-local _, cameraBody = MenuUI.makeSettingsCard("Camera Protection", "Limit unwanted zoom and simplify weapon scope overlays.")
+local _, cameraBody = MenuUI.makeSettingsCard("Scope Overlay", "Replace weapon scope images with clean cross bars.")
 Content = cameraBody
-addToggle("Anti Zoom", Settings.AntiZoomEnabled, function(value)
-    Settings.AntiZoomEnabled = value
-end, "AntiZoomEnabled")
-addSlider("Protected FOV: ", 50, 100, Settings.AntiZoomFOV, 0, function(value)
-    Settings.AntiZoomFOV = value
-end, "AntiZoomFOV")
 addToggle("Custom Scope", Settings.CustomScopeEnabled, function(value)
     Settings.CustomScopeEnabled = value
 end, "CustomScopeEnabled")
@@ -2292,19 +2268,9 @@ end
 Content = MenuUI.Pages.combat
 do
 local combatPage = Content
-local _, targetBody = MenuUI.makeSettingsCard("Targeting", "Visibility, aim speed and the optional FOV indicator.")
+local _, targetBody = MenuUI.makeSettingsCard("Targeting", "Visibility checks and aim speed.")
 Content = targetBody
 addToggle("Wall Check", Settings.WallCheck, function(value) Settings.WallCheck = value end, "WallCheck")
-addToggle("Show FOV", Settings.ShowFOV, function(value)
-    Settings.ShowFOV = value
-    FOVCircle.Visible = value
-end, "ShowFOV")
-addToggle("Rainbow FOV", Settings.RainbowFOV, function(value) Settings.RainbowFOV = value end, "RainbowFOV")
-
-addSlider("FOV Circle Radius (visual): ", 50, 2000, Settings.FOVRadius, 0, function(value)
-    Settings.FOVRadius = value
-    FOVCircle.Radius = value
-end, "FOVRadius")
 addSlider("Aim Speed (1=Legit, 10=Rage): ", 1, 10, Settings.AimSpeed, 0, function(value)
     Settings.AimSpeed = value
 end, "AimSpeed")
@@ -4580,7 +4546,7 @@ local function closestTarget()
                 or character:FindFirstChild("Head")
             )
             if head and isVisible(character, head) then
-                -- World-space scoring deliberately has no on-screen/FOV gate.
+                -- World-space scoring deliberately has no on-screen gate.
                 -- A target behind the camera is therefore still a valid target.
                 local offset = head.Position - cameraPosition
                 local distance = offset.Magnitude
@@ -4754,17 +4720,7 @@ RunService:BindToRenderStep("uorkeeESP", Enum.RenderPriority.Camera.Value, funct
             noteLocalAttack(attackTarget)
         end
     end
-    local color
-    if Settings.RainbowFOV then
-        color = Color3.fromHSV((tick() % 5) / 5, 1, 1)
-    else
-        color = themeColor()
-    end
-
-    FOVCircle.Position = viewportCenter()
-    FOVCircle.Radius = Settings.FOVRadius
-    FOVCircle.Visible = Settings.ShowFOV
-    FOVCircle.Color = color
+    local color = themeColor()
 
     for player, data in pairs(PlayerESP) do
         updatePlayerESP(player, data, color)
@@ -5135,145 +5091,6 @@ end
 do
     local state = {
         Alive = true,
-        Applied = false,
-        Enforcing = false,
-        Camera = nil,
-        FieldConnection = nil,
-        ModeConnection = nil,
-        CurrentCameraConnection = nil,
-        OriginalFOV = setmetatable({}, {__mode = "k"}),
-        OriginalFOVMode = setmetatable({}, {__mode = "k"}),
-    }
-    RuntimeEnvironment.uorkeeAntiZoomState = state
-
-    state.DisconnectCameraSignals = function()
-        if state.FieldConnection then
-            pcall(function() state.FieldConnection:Disconnect() end)
-            state.FieldConnection = nil
-        end
-        if state.ModeConnection then
-            pcall(function() state.ModeConnection:Disconnect() end)
-            state.ModeConnection = nil
-        end
-    end
-
-    state.RestoreCamera = function(camera)
-        if not camera then return end
-        local originalFOV = state.OriginalFOV[camera]
-        local originalMode = state.OriginalFOVMode[camera]
-        if originalFOV == nil and originalMode == nil then return end
-        state.Enforcing = true
-        if originalFOV ~= nil then
-            pcall(function() camera.FieldOfView = originalFOV end)
-        end
-        if originalMode ~= nil then
-            pcall(function() camera.FieldOfViewMode = originalMode end)
-        end
-        state.Enforcing = false
-        state.OriginalFOV[camera] = nil
-        state.OriginalFOVMode[camera] = nil
-    end
-
-    state.RestoreAll = function()
-        state.DisconnectCameraSignals()
-        for camera in pairs(state.OriginalFOV) do
-            state.RestoreCamera(camera)
-        end
-        table.clear(state.OriginalFOV)
-        table.clear(state.OriginalFOVMode)
-        state.Camera = nil
-        state.Applied = false
-    end
-
-    state.AttachCamera = function(camera)
-        if state.Camera == camera and state.FieldConnection then return end
-        state.DisconnectCameraSignals()
-        if state.Camera and state.Camera ~= camera then
-            state.RestoreCamera(state.Camera)
-        end
-        state.Camera = camera
-        if not camera then return end
-        if state.OriginalFOV[camera] == nil then
-            state.OriginalFOV[camera] = camera.FieldOfView
-        end
-        if state.OriginalFOVMode[camera] == nil then
-            pcall(function()
-                state.OriginalFOVMode[camera] = camera.FieldOfViewMode
-            end)
-        end
-        state.FieldConnection = camera:GetPropertyChangedSignal("FieldOfView"):Connect(function()
-            if state.Alive and Settings.AntiZoomEnabled and not state.Enforcing then
-                state.Enforce()
-            end
-        end)
-        pcall(function()
-            state.ModeConnection = camera:GetPropertyChangedSignal("FieldOfViewMode"):Connect(function()
-                if state.Alive and Settings.AntiZoomEnabled and not state.Enforcing then
-                    state.Enforce()
-                end
-            end)
-        end)
-    end
-
-    state.Enforce = function()
-        if state.Enforcing or not Settings.AntiZoomEnabled then return end
-        local currentCamera = workspace.CurrentCamera or Camera
-        if not currentCamera then return end
-        Camera = currentCamera
-        state.AttachCamera(currentCamera)
-        local protectedFOV = math.clamp(tonumber(Settings.AntiZoomFOV) or 70, 50, 100)
-        state.Enforcing = true
-        pcall(function() currentCamera.FieldOfView = protectedFOV end)
-        pcall(function()
-            currentCamera.FieldOfViewMode = Enum.FieldOfViewMode.Vertical
-        end)
-        state.Enforcing = false
-        state.Applied = true
-    end
-
-    state.CurrentCameraConnection =
-        workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
-            if not state.Alive then return end
-            if Settings.AntiZoomEnabled then
-                state.Enforce()
-            elseif state.Applied then
-                state.RestoreAll()
-            end
-        end)
-
-    state.Cleanup = function()
-        if not state.Alive then return end
-        state.Alive = false
-        pcall(function() RunService:UnbindFromRenderStep("uorkeeAntiZoom") end)
-        if state.CurrentCameraConnection then
-            pcall(function() state.CurrentCameraConnection:Disconnect() end)
-            state.CurrentCameraConnection = nil
-        end
-        state.RestoreAll()
-        if RuntimeEnvironment.uorkeeAntiZoomState == state then
-            RuntimeEnvironment.uorkeeAntiZoomState = nil
-            RuntimeEnvironment.uorkeeAntiZoomCleanup = nil
-        end
-    end
-    RuntimeEnvironment.uorkeeAntiZoomCleanup = state.Cleanup
-
-    RunService:BindToRenderStep(
-        "uorkeeAntiZoom",
-        Enum.RenderPriority.Last.Value + 6,
-        function()
-            if not state.Alive or stopped then return end
-            if Settings.AntiZoomEnabled then
-                state.Enforce()
-            elseif state.Applied then
-                state.RestoreAll()
-            end
-        end
-    )
-end
-
-do
-    local state = {
-        Alive = true,
         CurrentInterface = nil,
         CurrentScope = nil,
         HiddenImages = setmetatable({}, {__mode = "k"}),
@@ -5477,13 +5294,11 @@ MenuUI.terminate = function()
     if RuntimeEnvironment.uorkeeConfigSessionToken == ConfigSessionToken then
         RuntimeEnvironment.uorkeeConfigSessionToken = nil
     end
-    pcall(function() FOVCircle:Remove() end)
     pcall(function() RunService:UnbindFromRenderStep("uorkeeAimlock") end)
     pcall(function() RunService:UnbindFromRenderStep("uorkeeESP") end)
     pcall(function() RunService:UnbindFromRenderStep("uorkeeTriggerbot") end)
     pcall(function() RunService:UnbindFromRenderStep("uorkeeTeleportBind") end)
     pcall(function() RunService:UnbindFromRenderStep("uorkeeForceThirdPerson") end)
-    pcall(function() RunService:UnbindFromRenderStep("uorkeeAntiZoom") end)
     pcall(function() RunService:UnbindFromRenderStep("uorkeeCustomScope") end)
     pcall(function() RunService:UnbindFromRenderStep("uorkeeFakeLag") end)
     FakeLag.Restore()
@@ -5525,9 +5340,6 @@ MenuUI.terminate = function()
     end
     if type(RuntimeEnvironment.uorkeeThirdPersonCleanup) == "function" then
         pcall(RuntimeEnvironment.uorkeeThirdPersonCleanup)
-    end
-    if type(RuntimeEnvironment.uorkeeAntiZoomCleanup) == "function" then
-        pcall(RuntimeEnvironment.uorkeeAntiZoomCleanup)
     end
     if type(RuntimeEnvironment.uorkeeCustomScopeCleanup) == "function" then
         pcall(RuntimeEnvironment.uorkeeCustomScopeCleanup)
