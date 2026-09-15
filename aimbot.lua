@@ -260,6 +260,11 @@ local Settings = {
     HitSoundPitch = 1.0,
     HitSoundUseCustom = false,
     HitSoundCustomId = "",
+    KillSoundEnabled = true,
+    KillSoundVolume = 0.8,
+    KillSoundPitch = 0.72,
+    KillSoundUseCustom = false,
+    KillSoundCustomId = "",
     VictoryMusicEnabled = true,
     VictoryMusicVolume = 0.65,
     VictoryMusicId1 = "",
@@ -344,6 +349,8 @@ local ConfigKeys = {
     "CombatNotificationsEnabled",
     "HitSoundEnabled", "HitSoundVolume", "HitSoundPitch",
     "HitSoundUseCustom", "HitSoundCustomId",
+    "KillSoundEnabled", "KillSoundVolume", "KillSoundPitch",
+    "KillSoundUseCustom", "KillSoundCustomId",
     "VictoryMusicEnabled", "VictoryMusicVolume",
     "VictoryMusicId1", "VictoryMusicStartOffset1",
     "VictoryMusicId2", "VictoryMusicStartOffset2",
@@ -382,6 +389,11 @@ RuntimeEnvironment.uorkeeConfigSections = {
         HitSoundPitch = true,
         HitSoundUseCustom = true,
         HitSoundCustomId = true,
+        KillSoundEnabled = true,
+        KillSoundVolume = true,
+        KillSoundPitch = true,
+        KillSoundUseCustom = true,
+        KillSoundCustomId = true,
         VictoryMusicEnabled = true,
         VictoryMusicVolume = true,
         VictoryMusicId1 = true,
@@ -1127,7 +1139,7 @@ end
 do
     local definitions = {
         {"combat", "Combat", "Targeting and input"},
-        {"audio", "Audio", "Hit feedback and round music"},
+        {"audio", "Audio", "Hit, kill and victory sounds"},
         {"visuals", "Visuals", "Players and world"},
         {"movement", "Movement", "Speed and navigation"},
         {"binds", "Keybinds", "Keys and activation modes"},
@@ -2053,28 +2065,87 @@ local function addAction(text, callback)
     return button
 end
 
+function MenuUI.makeSettingsCard(title, description)
+    local card = create("Frame", Content, {
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundColor3 = GlassPalette.Surface,
+        BackgroundTransparency = 0.35,
+        BorderSizePixel = 0,
+    })
+    addCorner(card, 18)
+    local stroke = addStroke(card, themeColor():Lerp(GlassPalette.Hairline, 0.58), 1, 0.78)
+    local gradient = addLiquidGradient(card, 6)
+    create("UIPadding", card, {
+        PaddingTop = UDim.new(0, 13), PaddingBottom = UDim.new(0, 16),
+        PaddingLeft = UDim.new(0, 15), PaddingRight = UDim.new(0, 15),
+    })
+    create("UIListLayout", card, {
+        Padding = UDim.new(0, 9), SortOrder = Enum.SortOrder.LayoutOrder,
+    })
+    create("TextLabel", card, {
+        Size = UDim2.new(1, 0, 0, 23), BackgroundTransparency = 1,
+        Text = title, TextColor3 = GlassPalette.Text, TextSize = 15,
+        Font = Enum.Font.GothamBold, TextXAlignment = Enum.TextXAlignment.Left,
+    })
+    create("TextLabel", card, {
+        Size = UDim2.new(1, 0, 0, 33), BackgroundTransparency = 1,
+        Text = description, TextColor3 = GlassPalette.SecondaryText, TextSize = 11,
+        TextWrapped = true, Font = Enum.Font.GothamMedium,
+        TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
+    })
+    local body = create("Frame", card, {
+        Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+    })
+    create("UIListLayout", body, {
+        Padding = UDim.new(0, 9), SortOrder = Enum.SortOrder.LayoutOrder,
+    })
+    registerRefresh(function(color)
+        color = color or themeColor()
+        stroke.Color = color:Lerp(GlassPalette.Hairline, 0.58)
+        gradient.Color = liquidColors(color, 0.94)
+    end)
+    return card, body
+end
+
 Content = MenuUI.Pages.combat
-addToggle("Team Check", Settings.TeamCheck, function(value)
-    Settings.TeamCheck = value
-end, "TeamCheck")
-addToggle("Hit / Kill Notifications", Settings.CombatNotificationsEnabled, function(value)
-    Settings.CombatNotificationsEnabled = value
-end, "CombatNotificationsEnabled")
+do
+    local combatPage = Content
+    local _, basicsBody = MenuUI.makeSettingsCard("Combat Basics", "Team filtering and on-screen hit / kill notifications.")
+    Content = basicsBody
+    addToggle("Team Check", Settings.TeamCheck, function(value)
+        Settings.TeamCheck = value
+    end, "TeamCheck")
+    addToggle("Hit / Kill Notifications", Settings.CombatNotificationsEnabled, function(value)
+        Settings.CombatNotificationsEnabled = value
+    end, "CombatNotificationsEnabled")
+    Content = combatPage
+end
 
 Content = MenuUI.Pages.movement
-addSection("--- MOVEMENT ---")
+do
+local movementPage = Content
+local _, movementBody = MenuUI.makeSettingsCard("Movement", "Navigation controls; bind keys in the Keybinds tab.")
+Content = movementBody
 addToggle("Noclip", Settings.NoclipEnabled, function(value)
     Settings.NoclipEnabled = value
 end, "NoclipEnabled")
 addToggle("Infinite Jump", Settings.InfiniteJumpEnabled, function(value)
     Settings.InfiniteJumpEnabled = value
 end, "InfiniteJumpEnabled")
+Content = movementPage
+local _, cameraBody = MenuUI.makeSettingsCard("Third Person", "Show your character even when the game tries to force first person.")
+Content = cameraBody
 addToggle("Force Third Person", Settings.ForceThirdPersonEnabled, function(value)
     Settings.ForceThirdPersonEnabled = value
 end, "ForceThirdPersonEnabled")
 addSlider("Third Person Distance: ", 4, 20, Settings.ThirdPersonDistance, 1, function(value)
     Settings.ThirdPersonDistance = value
 end, "ThirdPersonDistance")
+Content = movementPage
+local _, networkBody = MenuUI.makeSettingsCard("Network Simulation", "Fake lag timing; only works in supported executors.")
+Content = networkBody
 addToggle("Fake Lag" .. (SetHiddenProperty and "" or " [unsupported]"), Settings.FakeLagEnabled, function(value)
     Settings.FakeLagEnabled = value
 end, "FakeLagEnabled")
@@ -2084,9 +2155,14 @@ end, "FakeLagHold")
 addSlider("Fake Lag Release: ", 0.01, 0.2, Settings.FakeLagRelease, 2, function(value)
     Settings.FakeLagRelease = value
 end, "FakeLagRelease")
+Content = movementPage
+end
 
 Content = MenuUI.Pages.visuals
-addSection("--- CAMERA PROTECTION ---")
+do
+local visualsPage = Content
+local _, cameraBody = MenuUI.makeSettingsCard("Camera Protection", "Limit unwanted zoom and simplify weapon scope overlays.")
+Content = cameraBody
 addToggle("Anti Zoom", Settings.AntiZoomEnabled, function(value)
     Settings.AntiZoomEnabled = value
 end, "AntiZoomEnabled")
@@ -2096,7 +2172,9 @@ end, "AntiZoomFOV")
 addToggle("Custom Scope", Settings.CustomScopeEnabled, function(value)
     Settings.CustomScopeEnabled = value
 end, "CustomScopeEnabled")
-addSection("--- ESP SETTINGS ---")
+Content = visualsPage
+local _, espBody = MenuUI.makeSettingsCard("ESP & Map", "Player labels and diagnostic danger-zone boundaries.")
+Content = espBody
 addToggle("Enable ESP", Settings.ESPEnabled, function(value) Settings.ESPEnabled = value end, "ESPEnabled")
 addToggle("Names ESP", Settings.NamesESP, function(value) Settings.NamesESP = value end, "NamesESP")
 addToggle("Map Boundary ESP [diagnostic]", Settings.BoundaryESPEnabled, function(value)
@@ -2104,68 +2182,118 @@ addToggle("Map Boundary ESP [diagnostic]", Settings.BoundaryESPEnabled, function
     local setter = RuntimeEnvironment.uorkeeSetBoundaryESP
     if type(setter) == "function" then setter(value) end
 end, "BoundaryESPEnabled")
-addSection("--- DEATH STATUE ---")
+Content = visualsPage
+local _, statueBody = MenuUI.makeSettingsCard("Death Statue", "A neon memorial for enemies whose elimination was yours.")
+Content = statueBody
 addToggle("Neon Statue On Death", Settings.DeathStatueEnabled, function(value)
     Settings.DeathStatueEnabled = value
 end, "DeathStatueEnabled")
 addTextInput("Statue Text", Settings.DeathStatueText, function(value)
     Settings.DeathStatueText = value
 end, "DeathStatueText", "Use {player} for the player's name")
+Content = visualsPage
+end
 
 Content = MenuUI.Pages.combat
-addSection("--- AIMBOT SETTINGS / 360 TARGETING ---")
+do
+local combatPage = Content
+local _, aimBody = MenuUI.makeSettingsCard("Aim & Trigger", "Aimbot target tracking and automatic firing.")
+Content = aimBody
 addToggle("Enable Aimbot", Settings.AimbotEnabled, function(value) Settings.AimbotEnabled = value end, "AimbotEnabled")
 addToggle("Auto LMB (Triggerbot)", Settings.TriggerbotEnabled, function(value)
     Settings.TriggerbotEnabled = value
 end, "TriggerbotEnabled")
+Content = combatPage
+end
 
 Content = MenuUI.Pages.audio
-addSection("--- HIT FEEDBACK ---")
-addToggle("XP Orb Hit Sound", Settings.HitSoundEnabled, function(value)
-    Settings.HitSoundEnabled = value
-end, "HitSoundEnabled")
-addSlider("Hit Sound Volume: ", 0, 1, Settings.HitSoundVolume, 2, function(value)
-    Settings.HitSoundVolume = value
-end, "HitSoundVolume")
-addSlider("Hit Sound Pitch: ", 0.55, 1.25, Settings.HitSoundPitch, 2, function(value)
-    Settings.HitSoundPitch = value
-end, "HitSoundPitch")
-addToggle("Use Custom Hit Sound (OFF = Default)", Settings.HitSoundUseCustom, function(value)
-    Settings.HitSoundUseCustom = value
-end, "HitSoundUseCustom")
-addTextInput("Custom Sound ID", Settings.HitSoundCustomId, function(value)
-    Settings.HitSoundCustomId = value
-end, "HitSoundCustomId", "Example: 123456789 or rbxassetid://123456789")
-addSection("--- ROUND VICTORY MUSIC ---")
-addToggle("Play Music When All Enemies Are Dead", Settings.VictoryMusicEnabled, function(value)
-    Settings.VictoryMusicEnabled = value
-    if not value and stopVictoryMusic then stopVictoryMusic(false) end
-    if value and requestVictoryMusicEvaluation then task.defer(requestVictoryMusicEvaluation) end
-end, "VictoryMusicEnabled")
-addSlider("Victory Music Volume: ", 0, 1, Settings.VictoryMusicVolume, 2, function(value)
-    Settings.VictoryMusicVolume = value
-    if updateVictoryMusicVolume then updateVictoryMusicVolume(value) end
-end, "VictoryMusicVolume")
-for slot = 1, 5 do
-    local slotNumber = slot
-    local settingKey = "VictoryMusicId" .. tostring(slot)
-    local offsetKey = "VictoryMusicStartOffset" .. tostring(slot)
-    addTextInput("Victory Song " .. tostring(slot) .. " ID", Settings[settingKey], function(value)
-        Settings[settingKey] = value
-        if requestVictoryMusicEvaluation then task.defer(requestVictoryMusicEvaluation) end
-    end, settingKey, "Optional Roblox audio ID")
-    addSlider("Song " .. tostring(slot) .. " Start (seconds): ", 0, 300, Settings[offsetKey], 1, function(value)
-        Settings[offsetKey] = value
-        if updateVictoryMusicOffset then updateVictoryMusicOffset(slotNumber, value) end
-    end, offsetKey)
-    addAction("Preview / Stop Song " .. tostring(slot), function()
-        local preview = RuntimeEnvironment.uorkeePreviewVictoryMusic
-        if preview then preview(slotNumber) end
+do
+    local audioPage = Content
+    local _, hitBody = MenuUI.makeSettingsCard("Hit Sound", "A short confirmation when your shot hits an enemy.")
+    Content = hitBody
+    addToggle("Enable Hit Sound", Settings.HitSoundEnabled, function(value)
+        Settings.HitSoundEnabled = value
+    end, "HitSoundEnabled")
+    addSlider("Volume: ", 0, 1, Settings.HitSoundVolume, 2, function(value)
+        Settings.HitSoundVolume = value
+    end, "HitSoundVolume")
+    addSlider("Pitch: ", 0.55, 1.25, Settings.HitSoundPitch, 2, function(value)
+        Settings.HitSoundPitch = value
+    end, "HitSoundPitch")
+    addToggle("Custom Sound (OFF = default XP orb)", Settings.HitSoundUseCustom, function(value)
+        Settings.HitSoundUseCustom = value
+    end, "HitSoundUseCustom")
+    addTextInput("Hit Sound ID", Settings.HitSoundCustomId, function(value)
+        Settings.HitSoundCustomId = value
+    end, "HitSoundCustomId", "123456789 or rbxassetid://123456789")
+    addAction("Preview Hit Sound", function()
+        local preview = RuntimeEnvironment.uorkeePreviewCombatSound
+        if preview then preview("hit") end
     end)
+
+    Content = audioPage
+    local _, killBody = MenuUI.makeSettingsCard("Kill Sound", "Plays once when an enemy's death is attributed to you.")
+    Content = killBody
+    addToggle("Enable Kill Sound", Settings.KillSoundEnabled, function(value)
+        Settings.KillSoundEnabled = value
+    end, "KillSoundEnabled")
+    addSlider("Volume: ", 0, 1, Settings.KillSoundVolume, 2, function(value)
+        Settings.KillSoundVolume = value
+    end, "KillSoundVolume")
+    addSlider("Pitch: ", 0.5, 1.5, Settings.KillSoundPitch, 2, function(value)
+        Settings.KillSoundPitch = value
+    end, "KillSoundPitch")
+    addToggle("Custom Sound (OFF = default low XP orb)", Settings.KillSoundUseCustom, function(value)
+        Settings.KillSoundUseCustom = value
+    end, "KillSoundUseCustom")
+    addTextInput("Kill Sound ID", Settings.KillSoundCustomId, function(value)
+        Settings.KillSoundCustomId = value
+    end, "KillSoundCustomId", "123456789 or rbxassetid://123456789")
+    addAction("Preview Kill Sound", function()
+        local preview = RuntimeEnvironment.uorkeePreviewCombatSound
+        if preview then preview("kill") end
+    end)
+
+    Content = audioPage
+    local _, musicBody = MenuUI.makeSettingsCard("Victory Music", "After all opponents are out, one of these tracks plays until the next round.")
+    Content = musicBody
+    addToggle("Enable Victory Music", Settings.VictoryMusicEnabled, function(value)
+        Settings.VictoryMusicEnabled = value
+        if not value and stopVictoryMusic then stopVictoryMusic(false) end
+        if value and requestVictoryMusicEvaluation then task.defer(requestVictoryMusicEvaluation) end
+    end, "VictoryMusicEnabled")
+    addSlider("Music Volume: ", 0, 1, Settings.VictoryMusicVolume, 2, function(value)
+        Settings.VictoryMusicVolume = value
+        if updateVictoryMusicVolume then updateVictoryMusicVolume(value) end
+    end, "VictoryMusicVolume")
+    for slot = 1, 5 do
+        local slotNumber = slot
+        local settingKey = "VictoryMusicId" .. tostring(slot)
+        local offsetKey = "VictoryMusicStartOffset" .. tostring(slot)
+        local _, trackBody = MenuUI.makeSettingsCard("Track " .. tostring(slot), "Optional audio ID, start offset and preview.")
+        Content = trackBody
+        addTextInput("Audio ID", Settings[settingKey], function(value)
+            Settings[settingKey] = value
+            if requestVictoryMusicEvaluation then task.defer(requestVictoryMusicEvaluation) end
+        end, settingKey, "Roblox audio asset ID")
+        addSlider("Start (seconds): ", 0, 300, Settings[offsetKey], 1, function(value)
+            Settings[offsetKey] = value
+            if updateVictoryMusicOffset then updateVictoryMusicOffset(slotNumber, value) end
+        end, offsetKey)
+        addAction("Preview / Stop Track " .. tostring(slot), function()
+            local preview = RuntimeEnvironment.uorkeePreviewVictoryMusic
+            if preview then preview(slotNumber) end
+        end)
+        Content = musicBody
+    end
+    Content = audioPage
 end
 
 Content = MenuUI.Pages.combat
-addSection("--- TARGETING ---")
+do
+local combatPage = Content
+local _, targetBody = MenuUI.makeSettingsCard("Targeting", "Visibility, aim speed and the optional FOV indicator.")
+Content = targetBody
 addToggle("Wall Check", Settings.WallCheck, function(value) Settings.WallCheck = value end, "WallCheck")
 addToggle("Show FOV", Settings.ShowFOV, function(value)
     Settings.ShowFOV = value
@@ -2180,14 +2308,21 @@ end, "FOVRadius")
 addSlider("Aim Speed (1=Legit, 10=Rage): ", 1, 10, Settings.AimSpeed, 0, function(value)
     Settings.AimSpeed = value
 end, "AimSpeed")
+Content = combatPage
+end
 Content = MenuUI.Pages.theme
-addSection("--- LIQUID GLASS THEME ---")
+do
+local appearancePage = Content
+local _, glassBody = MenuUI.makeSettingsCard("Liquid Glass", "Adjust transparency and pick any interface color.")
+Content = glassBody
 addSlider("Glass Transparency: ", 0, 1, Settings.MenuOpacity, 1, function(value)
     Settings.MenuOpacity = value
     Main.BackgroundTransparency = menuTransparency()
 end, "MenuOpacity")
 addColorPicker()
-addSection("--- WORLD AMBIENT ---")
+Content = appearancePage
+local _, ambientBody = MenuUI.makeSettingsCard("World Ambient", "Tint the scene and fill the air with subtle glowing particles.")
+Content = ambientBody
 addToggle("Ambient Mode (Tint + Air Particles)", Settings.AmbientModeEnabled, function(value)
     Settings.AmbientModeEnabled = value
     local setter = RuntimeEnvironment.uorkeeSetAmbientMode
@@ -2203,6 +2338,8 @@ addSlider("Ambient Particle Density: ", 10, 60, Settings.AmbientParticleRate, 0,
     local updater = RuntimeEnvironment.uorkeeUpdateAmbient
     if updater then updater() end
 end, "AmbientParticleRate")
+Content = appearancePage
+end
 
 Content = MenuUI.Pages.configs
 addSection("--- CONFIGS ---")
@@ -3325,20 +3462,27 @@ end
 -- Local hit feedback. The built-in electronic ping is pitched like an XP-orb
 -- pickup, so it does not depend on a third-party Roblox audio asset being public.
 local HitSoundAlive = true
-local ActiveHitSounds = {}
+local ActiveCombatSounds = {}
 local LastAttackInputAt = -math.huge
 local LastAttackTarget = nil
 local HitSoundAttackHeld = false
 local LastHitSoundAt = -math.huge
-local DEFAULT_HIT_SOUND_ID = "rbxassetid://118671160608385"
+local DEFAULT_COMBAT_SOUND_ID = "rbxassetid://118671160608385"
 
-local function selectedHitSoundId()
-    if not Settings.HitSoundUseCustom then
-        return DEFAULT_HIT_SOUND_ID
+local function selectedCombatSoundId(kind)
+    local customEnabled
+    if kind == "kill" then
+        customEnabled = Settings.KillSoundUseCustom
+    else
+        customEnabled = Settings.HitSoundUseCustom
     end
-    local digits = tostring(Settings.HitSoundCustomId or ""):match("%d+")
+    if not customEnabled then
+        return DEFAULT_COMBAT_SOUND_ID
+    end
+    local customId = kind == "kill" and Settings.KillSoundCustomId or Settings.HitSoundCustomId
+    local digits = tostring(customId or ""):match("%d+")
     if not digits or #digits > 20 then
-        return DEFAULT_HIT_SOUND_ID
+        return DEFAULT_COMBAT_SOUND_ID
     end
     return "rbxassetid://" .. digits
 end
@@ -3354,49 +3498,65 @@ local function recentLocalAttackMatches(player)
         and os.clock() - LastAttackInputAt <= 1.25
 end
 
-local function destroyHitSound(sound)
+local function destroyCombatSound(sound)
     if not sound then return end
-    ActiveHitSounds[sound] = nil
+    ActiveCombatSounds[sound] = nil
     pcall(function() sound:Destroy() end)
 end
 
-local function playHitSound()
-    if not HitSoundAlive or stopped or not Settings.HitSoundEnabled then return end
-    if Settings.HitSoundVolume <= 0 then return end
+local function playCombatSound(kind, preview)
+    if kind ~= "hit" and kind ~= "kill" then return end
+    if not HitSoundAlive or stopped then return end
+    local enabled
+    if kind == "kill" then
+        enabled = Settings.KillSoundEnabled
+    else
+        enabled = Settings.HitSoundEnabled
+    end
+    local volume = kind == "kill" and Settings.KillSoundVolume or Settings.HitSoundVolume
+    local pitch = kind == "kill" and Settings.KillSoundPitch or Settings.HitSoundPitch
+    if not preview and not enabled then return end
+    if volume <= 0 then return end
 
     local now = os.clock()
     -- Shotguns and multi-part damage can replicate several health changes in
     -- one frame; keep those as one clean confirmation sound.
-    if now - LastHitSoundAt < 0.035 then return end
-    LastHitSoundAt = now
+    if kind == "hit" and not preview then
+        if now - LastHitSoundAt < 0.035 then return end
+        LastHitSoundAt = now
+    end
 
     local sound = create("Sound", SoundService, {
-        Name = "uorkeeXPOrbHit",
-        SoundId = selectedHitSoundId(),
-        Volume = math.clamp(Settings.HitSoundVolume, 0, 1),
+        Name = kind == "kill" and "uorkeeKillSound" or "uorkeeXPOrbHit",
+        SoundId = selectedCombatSoundId(kind),
+        Volume = math.clamp(volume, 0, 1),
         PlaybackSpeed = math.clamp(
-            Settings.HitSoundPitch + math.random(-5, 5) / 100,
+            pitch + math.random(-5, 5) / 100,
             0.5,
             2
         ),
     })
-    ActiveHitSounds[sound] = true
+    ActiveCombatSounds[sound] = true
 
     local endedConnection
     endedConnection = sound.Ended:Connect(function()
         if endedConnection then endedConnection:Disconnect() end
-        destroyHitSound(sound)
+        destroyCombatSound(sound)
     end)
     local played = pcall(function() sound:Play() end)
     if not played then
         if endedConnection then endedConnection:Disconnect() end
-        destroyHitSound(sound)
+        destroyCombatSound(sound)
         return
     end
-    task.delay(2, function()
+    task.delay(kind == "kill" and 10 or 2, function()
         if endedConnection then pcall(function() endedConnection:Disconnect() end) end
-        destroyHitSound(sound)
+        destroyCombatSound(sound)
     end)
+end
+
+RuntimeEnvironment.uorkeePreviewCombatSound = function(kind)
+    playCombatSound(kind, true)
 end
 
 local function damageCreatorIsLocal(humanoid)
@@ -3449,7 +3609,8 @@ local function confirmLocalDamage(player, record, source, previousHealth, curren
 
     record.lastHitNoticeAt = now
     record.lastHitNoticeHealth = numericCurrent
-    playHitSound()
+    -- Death confirmation plays its own sound; do not stack a hit sound on top.
+    if numericCurrent > 0 then playCombatSound("hit") end
     showCombatNotification(
         "hit",
         player,
@@ -3479,10 +3640,11 @@ local function cleanupHitSound()
     HitSoundAlive = false
     HitSoundAttackHeld = false
     LastAttackTarget = nil
-    for sound in pairs(ActiveHitSounds) do
-        destroyHitSound(sound)
+    for sound in pairs(ActiveCombatSounds) do
+        destroyCombatSound(sound)
     end
-    table.clear(ActiveHitSounds)
+    table.clear(ActiveCombatSounds)
+    RuntimeEnvironment.uorkeePreviewCombatSound = nil
 end
 
 RuntimeEnvironment.uorkeeHitSoundCleanup = cleanupHitSound
@@ -4021,6 +4183,7 @@ local function markDeath(player, character, record, reason, preparedStatue)
         localKillConfirmed = creatorIsLocal == true
             or (creatorIsLocal == nil and recentlyHitByLocal == true)
         if localKillConfirmed then
+            playCombatSound("kill")
             showCombatNotification(
                 "kill",
                 player,
