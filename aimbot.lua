@@ -279,6 +279,8 @@ local Settings = {
     AmbientTintStrength = 0.24,
     AmbientParticleRate = 34,
     NoclipEnabled = false,
+    FlyEnabled = false,
+    FlySpeed = 90,
     InfiniteJumpEnabled = true,
     ForceThirdPersonEnabled = false,
     ThirdPersonDistance = 8,
@@ -301,6 +303,8 @@ local Settings = {
     TriggerbotBindMode = "Toggle",
     NoclipKey = Enum.KeyCode.N,
     NoclipBindMode = "Toggle",
+    FlyKey = Enum.KeyCode.F,
+    FlyBindMode = "Toggle",
     ThirdPersonKey = Enum.KeyCode.H,
     ThirdPersonBindMode = "Toggle",
     TeleportOffset = 3,
@@ -353,7 +357,7 @@ local ConfigKeys = {
     "VictoryMusicId4", "VictoryMusicStartOffset4",
     "VictoryMusicId5", "VictoryMusicStartOffset5",
     "AmbientModeEnabled", "AmbientTintStrength", "AmbientParticleRate",
-    "NoclipEnabled", "InfiniteJumpEnabled",
+    "NoclipEnabled", "FlyEnabled", "FlySpeed", "InfiniteJumpEnabled",
     "ForceThirdPersonEnabled", "ThirdPersonDistance",
     "FakeLagEnabled", "FakeLagHold", "FakeLagRelease",
     "WallCheck", "AimSpeed",
@@ -361,6 +365,7 @@ local ConfigKeys = {
     "MenuKey", "TeleportKey", "TeleportBindMode",
     "AimbotKey", "AimbotBindMode", "TriggerbotKey", "TriggerbotBindMode",
     "NoclipKey", "NoclipBindMode",
+    "FlyKey", "FlyBindMode",
     "ThirdPersonKey", "ThirdPersonBindMode",
     "TeleportOffset", "TeleportWhitelist",
 }
@@ -409,6 +414,8 @@ RuntimeEnvironment.uorkeeConfigSections = {
     },
     Movement = {
         NoclipEnabled = true,
+        FlyEnabled = true,
+        FlySpeed = true,
         InfiniteJumpEnabled = true,
         ForceThirdPersonEnabled = true,
         ThirdPersonDistance = true,
@@ -428,6 +435,8 @@ RuntimeEnvironment.uorkeeConfigSections = {
         TriggerbotBindMode = true,
         NoclipKey = true,
         NoclipBindMode = true,
+        FlyKey = true,
+        FlyBindMode = true,
         ThirdPersonKey = true,
         ThirdPersonBindMode = true,
     },
@@ -460,6 +469,7 @@ local BindingSettingKeys = {
     AimbotKey = true,
     TriggerbotKey = true,
     NoclipKey = true,
+    FlyKey = true,
     ThirdPersonKey = true,
 }
 
@@ -468,6 +478,7 @@ local BindModeSettingKeys = {
     AimbotBindMode = true,
     TriggerbotBindMode = true,
     NoclipBindMode = true,
+    FlyBindMode = true,
     ThirdPersonBindMode = true,
 }
 
@@ -1987,6 +1998,12 @@ local function addBindControl(label, bindingSetting, modeSetting)
         elseif modeSetting == "NoclipBindMode" then
             local state = RuntimeEnvironment.uorkeeMovementState
             if state then state.NoclipHeld = false end
+        elseif modeSetting == "FlyBindMode" then
+            local state = RuntimeEnvironment.uorkeeMovementState
+            if state then
+                state.FlyHeld = false
+                if state.RestoreFly then state.RestoreFly() end
+            end
         elseif modeSetting == "ThirdPersonBindMode" then
             local state = RuntimeEnvironment.uorkeeThirdPersonState
             if state then state.Held = false end
@@ -2013,6 +2030,7 @@ addBindControl("Teleport", "TeleportKey", "TeleportBindMode")
 addBindControl("Aimbot", "AimbotKey", "AimbotBindMode")
 addBindControl("Triggerbot", "TriggerbotKey", "TriggerbotBindMode")
 addBindControl("Noclip", "NoclipKey", "NoclipBindMode")
+addBindControl("Fly", "FlyKey", "FlyBindMode")
 addBindControl("Third Person", "ThirdPersonKey", "ThirdPersonBindMode")
 
 refreshKeyButtons = function()
@@ -2108,11 +2126,17 @@ end
 Content = MenuUI.Pages.movement
 do
 local movementPage = Content
-local _, movementBody = MenuUI.makeSettingsCard("Movement", "Navigation controls; bind keys in the Keybinds tab.")
+local _, movementBody = MenuUI.makeSettingsCard("Movement", "Fly: WASD to move, Space up, Ctrl down. Set its bind in Keybinds.")
 Content = movementBody
 addToggle("Noclip", Settings.NoclipEnabled, function(value)
     Settings.NoclipEnabled = value
 end, "NoclipEnabled")
+addToggle("Ultra Fly", Settings.FlyEnabled, function(value)
+    Settings.FlyEnabled = value
+end, "FlyEnabled")
+addSlider("Fly Speed (studs/s): ", 10, 300, Settings.FlySpeed, 0, function(value)
+    Settings.FlySpeed = value
+end, "FlySpeed")
 addToggle("Infinite Jump", Settings.InfiniteJumpEnabled, function(value)
     Settings.InfiniteJumpEnabled = value
 end, "InfiniteJumpEnabled")
@@ -4818,6 +4842,8 @@ end)
 
 local InfiniteJumpConnection = UserInputService.JumpRequest:Connect(function()
     if not Settings.InfiniteJumpEnabled then return end
+    local movementState = RuntimeEnvironment.uorkeeMovementState
+    if movementState and movementState.FlyActive and movementState.FlyActive() then return end
     local character = LocalPlayer.Character
     local humanoid = character and character:FindFirstChildOfClass("Humanoid")
     if humanoid and humanoid.Health > 0 then
@@ -4830,9 +4856,16 @@ do
     local state = {
         Alive = true,
         NoclipHeld = false,
+        FlyHeld = false,
         NoclipCharacter = nil,
         OriginalCollisions = setmetatable({}, {__mode = "k"}),
         Connection = nil,
+        FlyConnection = nil,
+        FlyRoot = nil,
+        FlyHumanoid = nil,
+        FlyAttachment = nil,
+        FlyVelocity = nil,
+        FlyOriginalPlatformStand = nil,
     }
     RuntimeEnvironment.uorkeeMovementState = state
 
@@ -4841,6 +4874,57 @@ do
             return state.NoclipHeld
         end
         return Settings.NoclipEnabled
+    end
+
+    state.FlyActive = function()
+        if Settings.FlyBindMode == "Hold" then
+            return state.FlyHeld
+        end
+        return Settings.FlyEnabled
+    end
+
+    state.RestoreFly = function()
+        if state.FlyVelocity then
+            pcall(function() state.FlyVelocity:Destroy() end)
+            state.FlyVelocity = nil
+        end
+        if state.FlyAttachment then
+            pcall(function() state.FlyAttachment:Destroy() end)
+            state.FlyAttachment = nil
+        end
+        if state.FlyHumanoid and state.FlyHumanoid.Parent then
+            pcall(function()
+                state.FlyHumanoid.PlatformStand = state.FlyOriginalPlatformStand == true
+            end)
+        end
+        if state.FlyRoot and state.FlyRoot.Parent then
+            pcall(function()
+                state.FlyRoot.AssemblyLinearVelocity = Vector3.zero
+            end)
+        end
+        state.FlyRoot = nil
+        state.FlyHumanoid = nil
+        state.FlyOriginalPlatformStand = nil
+    end
+
+    state.EnsureFly = function(root, humanoid)
+        if state.FlyRoot == root and state.FlyHumanoid == humanoid
+            and state.FlyVelocity and state.FlyVelocity.Parent then
+            return
+        end
+        state.RestoreFly()
+        state.FlyRoot = root
+        state.FlyHumanoid = humanoid
+        state.FlyOriginalPlatformStand = humanoid.PlatformStand
+        state.FlyAttachment = create("Attachment", root, {Name = "uorkeeFlyAttachment"})
+        state.FlyVelocity = create("LinearVelocity", root, {
+            Name = "uorkeeFlyVelocity",
+            Attachment0 = state.FlyAttachment,
+            RelativeTo = Enum.ActuatorRelativeTo.World,
+            VelocityConstraintMode = Enum.VelocityConstraintMode.Vector,
+            ForceLimitsEnabled = false,
+            VectorVelocity = Vector3.zero,
+        })
     end
 
     state.RestoreNoclip = function()
@@ -4862,6 +4946,11 @@ do
             pcall(function() state.Connection:Disconnect() end)
             state.Connection = nil
         end
+        if state.FlyConnection then
+            pcall(function() state.FlyConnection:Disconnect() end)
+            state.FlyConnection = nil
+        end
+        state.RestoreFly()
         state.RestoreNoclip()
         if RuntimeEnvironment.uorkeeMovementState == state then
             RuntimeEnvironment.uorkeeMovementState = nil
@@ -4890,6 +4979,48 @@ do
         elseif state.NoclipCharacter then
             state.RestoreNoclip()
         end
+    end)
+
+    state.FlyConnection = RunService.PreSimulation:Connect(function()
+        if not state.Alive or stopped then return end
+
+        local character = LocalPlayer.Character
+        local root = character and character:FindFirstChild("HumanoidRootPart")
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        if not state.FlyActive() or not root or root.Anchored
+            or not humanoid or humanoid.Health <= 0 then
+            if state.FlyRoot then state.RestoreFly() end
+            return
+        end
+
+        state.EnsureFly(root, humanoid)
+        local currentCamera = workspace.CurrentCamera
+        local look = currentCamera and currentCamera.CFrame.LookVector or root.CFrame.LookVector
+        local forward = Vector3.new(look.X, 0, look.Z)
+        if forward.Magnitude < 0.001 then
+            local fallback = root.CFrame.LookVector
+            forward = Vector3.new(fallback.X, 0, fallback.Z)
+        end
+        if forward.Magnitude < 0.001 then forward = Vector3.new(0, 0, -1) end
+        forward = forward.Unit
+        local right = Vector3.new(-forward.Z, 0, forward.X)
+
+        local direction = Vector3.zero
+        if not UserInputService:GetFocusedTextBox() then
+            local horizontal = (UserInputService:IsKeyDown(Enum.KeyCode.D) and 1 or 0)
+                - (UserInputService:IsKeyDown(Enum.KeyCode.A) and 1 or 0)
+            local depth = (UserInputService:IsKeyDown(Enum.KeyCode.W) and 1 or 0)
+                - (UserInputService:IsKeyDown(Enum.KeyCode.S) and 1 or 0)
+            local vertical = (UserInputService:IsKeyDown(Enum.KeyCode.Space) and 1 or 0)
+                - ((UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
+                    or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)) and 1 or 0)
+            direction = forward * depth + right * horizontal + Vector3.yAxis * vertical
+        end
+        if direction.Magnitude > 1 then direction = direction.Unit end
+
+        humanoid.PlatformStand = true
+        state.FlyVelocity.VectorVelocity = direction
+            * math.clamp(tonumber(Settings.FlySpeed) or 90, 10, 300)
     end)
 end
 
@@ -5445,6 +5576,17 @@ MainInputConnection = UserInputService.InputBegan:Connect(function(input, gamePr
         end
     end
 
+    if InputHelpers.Matches(input, Settings.FlyKey) then
+        local state = RuntimeEnvironment.uorkeeMovementState
+        if state then
+            if Settings.FlyBindMode == "Hold" then
+                state.FlyHeld = true
+            else
+                InputHelpers.ToggleSetting("FlyEnabled")
+            end
+        end
+    end
+
     if InputHelpers.Matches(input, Settings.ThirdPersonKey) then
         local state = RuntimeEnvironment.uorkeeThirdPersonState
         if state then
@@ -5478,6 +5620,10 @@ MainInputEndedConnection = UserInputService.InputEnded:Connect(function(input)
     if InputHelpers.Matches(input, Settings.NoclipKey) then
         local state = RuntimeEnvironment.uorkeeMovementState
         if state then state.NoclipHeld = false end
+    end
+    if InputHelpers.Matches(input, Settings.FlyKey) then
+        local state = RuntimeEnvironment.uorkeeMovementState
+        if state then state.FlyHeld = false end
     end
     if InputHelpers.Matches(input, Settings.ThirdPersonKey) then
         local state = RuntimeEnvironment.uorkeeThirdPersonState
